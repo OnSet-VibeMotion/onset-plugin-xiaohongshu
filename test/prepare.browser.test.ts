@@ -44,11 +44,23 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
 });
 afterAll(async () => {
-  for (const browser of browsers) { try { await browser.send('Browser.close'); } catch {} browser.disconnect(); }
+  const ownedProcesses = new Set<number>();
+  for (const browser of browsers) {
+    try {
+      const info = await browser.send('SystemInfo.getProcessInfo');
+      for (const processInfo of info.processInfo) ownedProcesses.add(processInfo.id);
+      await browser.send('Browser.close');
+    } catch {} finally { browser.disconnect(); }
+  }
   await new Promise<void>(r => server.close(() => r()));
-  // Chromium may still be flushing its profile after Browser.close.
-  await new Promise(r => setTimeout(r, 500));
-  fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  // Browser.close acknowledges the request before Chromium and its children have
+  // exited. Only these test-owned PIDs may be stopped; never touch normal Chrome.
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const deadline = Date.now() + 5000;
+  while ([...ownedProcesses].some(alive) && Date.now() < deadline) await new Promise(r => setTimeout(r, 100));
+  for (const pid of ownedProcesses) if (alive(pid)) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+  await new Promise(r => setTimeout(r, 300));
+  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 });
 async function pageFor(name: string) {
   const profile = path.join(root, name); fs.mkdirSync(profile, { recursive: true });
