@@ -42,16 +42,19 @@ export async function openBrowser(profile: string, options: { executable?: strin
   const executable = findBrowser(options.executable);
   const args = [`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
     '--no-first-run', '--no-default-browser-check', '--disable-session-crashed-bubble',
+    '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-extensions', '--disable-sync',
     ...(options.headless ? ['--headless=new'] : []), 'about:blank'];
   const child = spawn(executable, args, { detached: true, stdio: 'ignore' });
   let failure: Error | undefined;
   child.on('error', err => { failure = err; }); child.unref();
-  const deadline = Date.now() + 15_000;
+  // CI 虚拟机第一次启动 Chrome 可能超过 15 秒；这里只是测试夹具，不进入插件运行产物。
+  const deadline = Date.now() + (process.env.CI ? 45_000 : 15_000);
   while (Date.now() < deadline) {
     if (failure) throw Error(`无法启动浏览器：${failure.message}`);
     const endpoint = await existingEndpoint(profile);
     if (endpoint) return CDP.connect(endpoint);
     await delay(200);
   }
-  throw Error('浏览器启动超时，请关闭这个插件账号的浏览器窗口后重试');
+  child.kill('SIGTERM');
+  throw Error('测试浏览器启动超时');
 }
