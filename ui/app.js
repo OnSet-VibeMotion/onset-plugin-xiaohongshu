@@ -43,7 +43,7 @@ async function run(operation, params = {}) {
   try {
     await onset.run(operation, { ...params, request_id: requestID });
     deadline = Date.now() + 20 * 60 * 1000;
-    status('正在准备，请查看打开的浏览器窗口…');
+    status('正在准备，请在片场内的小红书页面查看进度…');
     timer = setInterval(refresh, 800);
     await refresh();
   } catch (err) { activeRequest = ''; status(err.message, true); buttons(); }

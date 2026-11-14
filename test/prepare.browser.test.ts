@@ -3,27 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { openBrowser, findBrowser } from '../src/browser';
+import { openBrowser, findBrowser } from './support/browser';
 import { CDP, Page } from '../src/cdp';
 import { preparePage } from '../src/prepare';
 
 let root: string, origin: string, server: http.Server;
 const browsers: Awaited<ReturnType<typeof openBrowser>>[] = [];
-const fixture = `<!doctype html><html lang="zh"><body>
-<button class="creator-tab">上传视频</button>
-<input type="file" class="upload-input" accept="video/*">
-<p id="progress">请上传视频</p>
-<input placeholder="填写标题"><div contenteditable="true" class="tiptap ProseMirror" style="min-height:60px"></div>
-<button class="upload-cover">设置封面</button>
-<div class="d-modal" hidden><button>上传封面</button><div class="upload-wrapper"><input type="file" accept="image/*"></div><div class="d-modal-footer"><button id="confirm">确定</button></div></div>
-<div class="publish-page-publish-btn"><button id="publish">发布</button></div>
-<script>
-window.submits=0; window.uploads=[];
-document.querySelector('.upload-input').onchange=e=>{uploads.push(e.target.files[0].name);document.querySelector('#progress').textContent='上传成功，重新上传';};
-document.querySelector('.upload-cover').onclick=()=>document.querySelector('.d-modal').hidden=false;
-document.querySelector('#confirm').onclick=()=>{document.querySelector('.d-modal').hidden=true;document.querySelector('.upload-cover').textContent='编辑封面';};
-document.querySelector('#publish').onclick=()=>submits++;
-</script></body></html>`;
+const fixture = fs.readFileSync(new URL('./fixtures/creator.html', import.meta.url), 'utf8');
 beforeAll(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'onset-xhs-browser-'));
   server = http.createServer((req, res) => {

@@ -1,4 +1,11 @@
 import * as scripts from './page-scripts';
+export interface BrowserConnection {
+  attached?: boolean;
+  reused?: boolean;
+  send(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<any>;
+  disconnect(): void;
+}
+
 type Pending = { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 export class CDP {
   private next = 0;
@@ -44,8 +51,13 @@ export class CDP {
 export const CreatorOrigin = 'https://creator.xiaohongshu.com';
 export const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 export class Page {
-  private constructor(private cdp: CDP, private sessionId: string, readonly origin: string) {}
-  static async create(cdp: CDP, origin = CreatorOrigin): Promise<Page> {
+  private constructor(private cdp: BrowserConnection, private sessionId: string, readonly origin: string) {}
+  static async create(cdp: BrowserConnection, origin = CreatorOrigin): Promise<Page> {
+    if (cdp.attached) {
+      const page = new Page(cdp, '', origin);
+      await page.raw('Page.enable'); await page.raw('Page.bringToFront');
+      return page;
+    }
     const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', newWindow: true });
     const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
     const page = new Page(cdp, sessionId, origin);

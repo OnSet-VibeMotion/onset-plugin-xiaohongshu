@@ -1,57 +1,33 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
-import { spawn } from 'node:child_process';
-import { CDP, delay } from './cdp';
+import { CreatorOrigin, type BrowserConnection } from './cdp';
 
-export function findBrowser(configured = ''): string {
-  const candidates = configured ? [configured] : process.platform === 'darwin' ? [
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    path.join(os.homedir(), 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  ] : process.platform === 'win32' ? [
-    path.join(process.env.PROGRAMFILES ?? 'C:\\Program Files', 'Google/Chrome/Application/chrome.exe'),
-    path.join(process.env.LOCALAPPDATA ?? '', 'Google/Chrome/Application/chrome.exe'),
-    path.join(process.env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)', 'Microsoft/Edge/Application/msedge.exe'),
-  ] : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
-  for (const file of candidates) {
-    if (!path.isAbsolute(file)) continue;
-    try { fs.accessSync(file, fs.constants.X_OK); if (fs.statSync(file).isFile()) return file; } catch {}
-  }
-  throw Error('未找到 Chrome 或 Edge，请先安装浏览器，或在插件设置中填写浏览器程序路径');
+export interface BrowserBridge { endpoint: string; token: string }
+export function validateBridge(value: unknown): BrowserBridge {
+  if (!value || typeof value !== 'object') throw Error('请更新片场客户端，当前版本尚不支持客户端内小红书页面');
+  const { endpoint, token } = value as Partial<BrowserBridge>;
+  if (typeof endpoint !== 'string' || typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token)) throw Error('客户端网页连接无效');
+  const url = new URL(endpoint);
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw Error('客户端网页连接必须是本机的临时连接');
+  return { endpoint, token };
 }
 
-async function existingEndpoint(profile: string): Promise<string | null> {
-  try {
-    const file = path.join(profile, 'DevToolsActivePort');
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024) return null;
-    const [port, browserPath] = fs.readFileSync(file, 'utf8').trim().split(/\r?\n/);
-    if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535 || !/^\/devtools\/browser\/[\w-]+$/.test(browserPath)) return null;
-    const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(700), redirect: 'error' });
-    const info = await response.json() as { webSocketDebuggerUrl?: string };
-    const expected = `ws://127.0.0.1:${port}${browserPath}`;
-    return info.webSocketDebuggerUrl === expected ? expected : null;
-  } catch { return null; }
-}
-
-/** Own profile only; no browser install, default-profile access, or credential export. */
-export async function openBrowser(profile: string, options: { executable?: string; headless?: boolean } = {}): Promise<CDP> {
-  const existing = await existingEndpoint(profile);
-  if (existing) return CDP.connect(existing);
-  const executable = findBrowser(options.executable);
-  const args = [`--user-data-dir=${profile}`, '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1',
-    '--no-first-run', '--no-default-browser-check', '--disable-session-crashed-bubble',
-    ...(options.headless ? ['--headless=new'] : []), 'about:blank'];
-  const child = spawn(executable, args, { detached: true, stdio: 'ignore' });
-  let failure: Error | undefined;
-  child.on('error', err => { failure = err; }); child.unref();
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (failure) throw Error(`无法启动浏览器：${failure.message}`);
-    const endpoint = await existingEndpoint(profile);
-    if (endpoint) return CDP.connect(endpoint);
-    await delay(200);
-  }
-  throw Error('浏览器启动超时，请关闭这个插件账号的浏览器窗口后重试');
+/** Only controls the page owned by the desktop host. Never launches a separate browser. */
+export async function openBrowser(_profile: string, options: { bridge?: BrowserBridge; account: string; label: string }): Promise<BrowserConnection> {
+  const bridge = validateBridge(options.bridge);
+  let connected = true;
+  const request = async (body: Record<string, unknown>) => {
+    if (!connected) throw Error('网页自动填写已结束');
+    const response = await fetch(bridge.endpoint, {
+      method: 'POST', headers: { authorization: `Bearer ${bridge.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(45_000), redirect: 'error',
+    });
+    const result = await response.json() as Record<string, any>;
+    if (!response.ok) throw Error(result.error || '客户端网页操作失败');
+    return result;
+  };
+  const opened = await request({ action: 'open', account: options.account, label: options.label, url: CreatorOrigin + '/' });
+  return {
+    attached: true, reused: opened.reused === true,
+    send: (method, params = {}) => request({ action: 'command', method, params }),
+    disconnect() { connected = false; },
+  };
 }

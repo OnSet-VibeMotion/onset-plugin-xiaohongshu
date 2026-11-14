@@ -106,17 +106,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path6) {
-      const ctrl = callVisitor(key, node, visitor, path6);
+    function visit_(key, node, visitor, path5) {
+      const ctrl = callVisitor(key, node, visitor, path5);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path6, ctrl);
-        return visit_(key, ctrl, visitor, path6);
+        replaceNode(key, path5, ctrl);
+        return visit_(key, ctrl, visitor, path5);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path6 = Object.freeze(path6.concat(node));
+          path5 = Object.freeze(path5.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path6);
+            const ci = visit_(i, node.items[i], visitor, path5);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -127,13 +127,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path6 = Object.freeze(path6.concat(node));
-          const ck = visit_("key", node.key, visitor, path6);
+          path5 = Object.freeze(path5.concat(node));
+          const ck = visit_("key", node.key, visitor, path5);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path6);
+          const cv = visit_("value", node.value, visitor, path5);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -154,17 +154,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path6) {
-      const ctrl = await callVisitor(key, node, visitor, path6);
+    async function visitAsync_(key, node, visitor, path5) {
+      const ctrl = await callVisitor(key, node, visitor, path5);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path6, ctrl);
-        return visitAsync_(key, ctrl, visitor, path6);
+        replaceNode(key, path5, ctrl);
+        return visitAsync_(key, ctrl, visitor, path5);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path6 = Object.freeze(path6.concat(node));
+          path5 = Object.freeze(path5.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path6);
+            const ci = await visitAsync_(i, node.items[i], visitor, path5);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -175,13 +175,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path6 = Object.freeze(path6.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path6);
+          path5 = Object.freeze(path5.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path5);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path6);
+          const cv = await visitAsync_("value", node.value, visitor, path5);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -208,23 +208,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path6) {
+    function callVisitor(key, node, visitor, path5) {
       if (typeof visitor === "function")
-        return visitor(key, node, path6);
+        return visitor(key, node, path5);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path6);
+        return visitor.Map?.(key, node, path5);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path6);
+        return visitor.Seq?.(key, node, path5);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path6);
+        return visitor.Pair?.(key, node, path5);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path6);
+        return visitor.Scalar?.(key, node, path5);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path6);
+        return visitor.Alias?.(key, node, path5);
       return void 0;
     }
-    function replaceNode(key, path6, node) {
-      const parent = path6[path6.length - 1];
+    function replaceNode(key, path5, node) {
+      const parent = path5[path5.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -836,10 +836,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path6, value) {
+    function collectionFromPath(schema, path5, value) {
       let v = value;
-      for (let i = path6.length - 1; i >= 0; --i) {
-        const k = path6[i];
+      for (let i = path5.length - 1; i >= 0; --i) {
+        const k = path5[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -858,7 +858,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path6) => path6 == null || typeof path6 === "object" && !!path6[Symbol.iterator]().next().done;
+    var isEmptyPath = (path5) => path5 == null || typeof path5 === "object" && !!path5[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -888,11 +888,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path6, value) {
-        if (isEmptyPath(path6))
+      addIn(path5, value) {
+        if (isEmptyPath(path5))
           this.add(value);
         else {
-          const [key, ...rest] = path6;
+          const [key, ...rest] = path5;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -906,8 +906,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path6) {
-        const [key, ...rest] = path6;
+      deleteIn(path5) {
+        const [key, ...rest] = path5;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -921,8 +921,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path6, keepScalar) {
-        const [key, ...rest] = path6;
+      getIn(path5, keepScalar) {
+        const [key, ...rest] = path5;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -940,8 +940,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path6) {
-        const [key, ...rest] = path6;
+      hasIn(path5) {
+        const [key, ...rest] = path5;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -951,8 +951,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path6, value) {
-        const [key, ...rest] = path6;
+      setIn(path5, value) {
+        const [key, ...rest] = path5;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -3467,9 +3467,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path6, value) {
+      addIn(path5, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path6, value);
+          this.contents.addIn(path5, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3544,14 +3544,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path6) {
-        if (Collection.isEmptyPath(path6)) {
+      deleteIn(path5) {
+        if (Collection.isEmptyPath(path5)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path6) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path5) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3566,10 +3566,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path6, keepScalar) {
-        if (Collection.isEmptyPath(path6))
+      getIn(path5, keepScalar) {
+        if (Collection.isEmptyPath(path5))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path6, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path5, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3580,10 +3580,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path6) {
-        if (Collection.isEmptyPath(path6))
+      hasIn(path5) {
+        if (Collection.isEmptyPath(path5))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path6) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path5) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3600,13 +3600,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path6, value) {
-        if (Collection.isEmptyPath(path6)) {
+      setIn(path5, value) {
+        if (Collection.isEmptyPath(path5)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path6), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path5), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path6, value);
+          this.contents.setIn(path5, value);
         }
       }
       /**
@@ -5567,9 +5567,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path6) => {
+    visit.itemAtPath = (cst, path5) => {
       let item = cst;
-      for (const [field, index] of path6) {
+      for (const [field, index] of path5) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5578,23 +5578,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path6) => {
-      const parent = visit.itemAtPath(cst, path6.slice(0, -1));
-      const field = path6[path6.length - 1][0];
+    visit.parentCollection = (cst, path5) => {
+      const parent = visit.itemAtPath(cst, path5.slice(0, -1));
+      const field = path5[path5.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path6, item, visitor) {
-      let ctrl = visitor(item, path6);
+    function _visit(path5, item, visitor) {
+      let ctrl = visitor(item, path5);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path6.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path5.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5605,10 +5605,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path6);
+            ctrl = ctrl(item, path5);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path6) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path5) : ctrl;
     }
     exports2.visit = visit;
   }
@@ -6910,14 +6910,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs5 = this.flowScalar(this.type);
+              const fs4 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs5, sep: [] });
+                map.items.push({ start, key: fs4, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs5);
+                this.stack.push(fs4);
               } else {
-                Object.assign(it, { key: fs5, sep: [] });
+                Object.assign(it, { key: fs4, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -7045,13 +7045,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs5 = this.flowScalar(this.type);
+              const fs4 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs5, sep: [] });
+                fc.items.push({ start: [], key: fs4, sep: [] });
               else if (it.sep)
-                this.stack.push(fs5);
+                this.stack.push(fs4);
               else
-                Object.assign(it, { key: fs5, sep: [] });
+                Object.assign(it, { key: fs4, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -7360,7 +7360,7 @@ var require_dist = __commonJS({
 });
 
 // src/app.ts
-var import_node_path5 = __toESM(require("node:path"), 1);
+var import_node_path4 = __toESM(require("node:path"), 1);
 
 // src/accounts.ts
 var import_node_fs2 = __toESM(require("node:fs"), 1);
@@ -7507,12 +7507,6 @@ async function withAccountLock(profile, run) {
   }
 }
 
-// src/browser.ts
-var import_node_fs3 = __toESM(require("node:fs"), 1);
-var import_node_path3 = __toESM(require("node:path"), 1);
-var import_node_os = __toESM(require("node:os"), 1);
-var import_node_child_process = require("node:child_process");
-
 // src/page-scripts.ts
 function query(selector) {
   return document.querySelector(selector);
@@ -7569,68 +7563,6 @@ function selectContent() {
 }
 
 // src/cdp.ts
-var CDP = class _CDP {
-  constructor(socket) {
-    this.socket = socket;
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String(event.data));
-      const request2 = this.pending.get(message.id);
-      if (!request2) return;
-      clearTimeout(request2.timer);
-      this.pending.delete(message.id);
-      if (message.error) request2.reject(Error(message.error.message));
-      else request2.resolve(message.result ?? {});
-    });
-    socket.addEventListener("close", () => this.rejectPending());
-  }
-  socket;
-  next = 0;
-  pending = /* @__PURE__ */ new Map();
-  static async connect(endpoint) {
-    const url = new URL(endpoint);
-    if (url.protocol !== "ws:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) throw Error("\u6D4F\u89C8\u5668\u8C03\u8BD5\u8FDE\u63A5\u5FC5\u987B\u5728\u672C\u673A");
-    const socket = new WebSocket(endpoint);
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        socket.close();
-        reject(Error("\u8FDE\u63A5\u6D4F\u89C8\u5668\u8D85\u65F6"));
-      }, 5e3);
-      socket.addEventListener("open", () => {
-        clearTimeout(timer);
-        resolve();
-      }, { once: true });
-      socket.addEventListener("error", () => {
-        clearTimeout(timer);
-        reject(Error("\u65E0\u6CD5\u8FDE\u63A5\u6D4F\u89C8\u5668"));
-      }, { once: true });
-    });
-    return new _CDP(socket);
-  }
-  send(method, params = {}, sessionId) {
-    if (this.socket.readyState !== WebSocket.OPEN) return Promise.reject(Error("\u6D4F\u89C8\u5668\u7A97\u53E3\u5DF2\u5173\u95ED"));
-    const id = ++this.next;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(Error(`\u6D4F\u89C8\u5668\u64CD\u4F5C\u8D85\u65F6\uFF1A${method}`));
-      }, 15e3);
-      this.pending.set(id, { resolve, reject, timer });
-      this.socket.send(JSON.stringify({ id, method, params, ...sessionId ? { sessionId } : {} }));
-    });
-  }
-  rejectPending() {
-    for (const request2 of this.pending.values()) {
-      clearTimeout(request2.timer);
-      request2.reject(Error("\u6D4F\u89C8\u5668\u8FDE\u63A5\u5DF2\u65AD\u5F00"));
-    }
-    this.pending.clear();
-  }
-  /** Disconnect automation only. Never close the user's browser. */
-  disconnect() {
-    this.rejectPending();
-    this.socket.close();
-  }
-};
 var CreatorOrigin = "https://creator.xiaohongshu.com";
 var delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 var Page = class _Page {
@@ -7643,6 +7575,12 @@ var Page = class _Page {
   sessionId;
   origin;
   static async create(cdp, origin = CreatorOrigin) {
+    if (cdp.attached) {
+      const page2 = new _Page(cdp, "", origin);
+      await page2.raw("Page.enable");
+      await page2.raw("Page.bringToFront");
+      return page2;
+    }
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank", newWindow: true });
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
     const page = new _Page(cdp, sessionId, origin);
@@ -7697,74 +7635,44 @@ var Page = class _Page {
 };
 
 // src/browser.ts
-function findBrowser(configured = "") {
-  const candidates = configured ? [configured] : process.platform === "darwin" ? [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    import_node_path3.default.join(import_node_os.default.homedir(), "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
-  ] : process.platform === "win32" ? [
-    import_node_path3.default.join(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google/Chrome/Application/chrome.exe"),
-    import_node_path3.default.join(process.env.LOCALAPPDATA ?? "", "Google/Chrome/Application/chrome.exe"),
-    import_node_path3.default.join(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Microsoft/Edge/Application/msedge.exe")
-  ] : ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
-  for (const file of candidates) {
-    if (!import_node_path3.default.isAbsolute(file)) continue;
-    try {
-      import_node_fs3.default.accessSync(file, import_node_fs3.default.constants.X_OK);
-      if (import_node_fs3.default.statSync(file).isFile()) return file;
-    } catch {
+function validateBridge(value) {
+  if (!value || typeof value !== "object") throw Error("\u8BF7\u66F4\u65B0\u7247\u573A\u5BA2\u6237\u7AEF\uFF0C\u5F53\u524D\u7248\u672C\u5C1A\u4E0D\u652F\u6301\u5BA2\u6237\u7AEF\u5185\u5C0F\u7EA2\u4E66\u9875\u9762");
+  const { endpoint, token } = value;
+  if (typeof endpoint !== "string" || typeof token !== "string" || !/^[0-9a-f]{64}$/.test(token)) throw Error("\u5BA2\u6237\u7AEF\u7F51\u9875\u8FDE\u63A5\u65E0\u6548");
+  const url = new URL(endpoint);
+  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port || url.pathname !== "/" || url.search || url.hash || url.username || url.password) throw Error("\u5BA2\u6237\u7AEF\u7F51\u9875\u8FDE\u63A5\u5FC5\u987B\u662F\u672C\u673A\u7684\u4E34\u65F6\u8FDE\u63A5");
+  return { endpoint, token };
+}
+async function openBrowser(_profile, options) {
+  const bridge = validateBridge(options.bridge);
+  let connected = true;
+  const request2 = async (body) => {
+    if (!connected) throw Error("\u7F51\u9875\u81EA\u52A8\u586B\u5199\u5DF2\u7ED3\u675F");
+    const response = await fetch(bridge.endpoint, {
+      method: "POST",
+      headers: { authorization: `Bearer ${bridge.token}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(45e3),
+      redirect: "error"
+    });
+    const result = await response.json();
+    if (!response.ok) throw Error(result.error || "\u5BA2\u6237\u7AEF\u7F51\u9875\u64CD\u4F5C\u5931\u8D25");
+    return result;
+  };
+  const opened = await request2({ action: "open", account: options.account, label: options.label, url: CreatorOrigin + "/" });
+  return {
+    attached: true,
+    reused: opened.reused === true,
+    send: (method, params = {}) => request2({ action: "command", method, params }),
+    disconnect() {
+      connected = false;
     }
-  }
-  throw Error("\u672A\u627E\u5230 Chrome \u6216 Edge\uFF0C\u8BF7\u5148\u5B89\u88C5\u6D4F\u89C8\u5668\uFF0C\u6216\u5728\u63D2\u4EF6\u8BBE\u7F6E\u4E2D\u586B\u5199\u6D4F\u89C8\u5668\u7A0B\u5E8F\u8DEF\u5F84");
-}
-async function existingEndpoint(profile) {
-  try {
-    const file = import_node_path3.default.join(profile, "DevToolsActivePort");
-    const stat = import_node_fs3.default.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024) return null;
-    const [port, browserPath] = import_node_fs3.default.readFileSync(file, "utf8").trim().split(/\r?\n/);
-    if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535 || !/^\/devtools\/browser\/[\w-]+$/.test(browserPath)) return null;
-    const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(700), redirect: "error" });
-    const info = await response.json();
-    const expected = `ws://127.0.0.1:${port}${browserPath}`;
-    return info.webSocketDebuggerUrl === expected ? expected : null;
-  } catch {
-    return null;
-  }
-}
-async function openBrowser(profile, options = {}) {
-  const existing = await existingEndpoint(profile);
-  if (existing) return CDP.connect(existing);
-  const executable = findBrowser(options.executable);
-  const args = [
-    `--user-data-dir=${profile}`,
-    "--remote-debugging-port=0",
-    "--remote-debugging-address=127.0.0.1",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-session-crashed-bubble",
-    ...options.headless ? ["--headless=new"] : [],
-    "about:blank"
-  ];
-  const child = (0, import_node_child_process.spawn)(executable, args, { detached: true, stdio: "ignore" });
-  let failure;
-  child.on("error", (err) => {
-    failure = err;
-  });
-  child.unref();
-  const deadline = Date.now() + 15e3;
-  while (Date.now() < deadline) {
-    if (failure) throw Error(`\u65E0\u6CD5\u542F\u52A8\u6D4F\u89C8\u5668\uFF1A${failure.message}`);
-    const endpoint = await existingEndpoint(profile);
-    if (endpoint) return CDP.connect(endpoint);
-    await delay(200);
-  }
-  throw Error("\u6D4F\u89C8\u5668\u542F\u52A8\u8D85\u65F6\uFF0C\u8BF7\u5173\u95ED\u8FD9\u4E2A\u63D2\u4EF6\u8D26\u53F7\u7684\u6D4F\u89C8\u5668\u7A97\u53E3\u540E\u91CD\u8BD5");
+  };
 }
 
 // src/draft.ts
-var import_node_fs4 = __toESM(require("node:fs"), 1);
-var import_node_path4 = __toESM(require("node:path"), 1);
+var import_node_fs3 = __toESM(require("node:fs"), 1);
+var import_node_path3 = __toESM(require("node:path"), 1);
 var import_node_crypto3 = require("node:crypto");
 var import_yaml = __toESM(require_dist(), 1);
 function record(value) {
@@ -7777,8 +7685,8 @@ function text(value, field) {
 }
 async function readDraft(root) {
   const file = projectFile(root, "publish.md");
-  if (import_node_fs4.default.statSync(file).size > 262144) throw Error("publish.md \u592A\u5927");
-  const raw = import_node_fs4.default.readFileSync(file, "utf8");
+  if (import_node_fs3.default.statSync(file).size > 262144) throw Error("publish.md \u592A\u5927");
+  const raw = import_node_fs3.default.readFileSync(file, "utf8");
   const match = raw.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) throw Error("publish.md \u7F3A\u5C11 YAML \u53D1\u5E03\u4FE1\u606F");
   const doc = (0, import_yaml.parseDocument)(match[1], { uniqueKeys: true });
@@ -7807,9 +7715,9 @@ ${attribution}`;
   }))];
   if ([...content, ...normalizedTags.join(" #")].length > 1e3) throw Error("\u6B63\u6587\u4E0E\u8BDD\u9898\u8D85\u8FC7 1000 \u5B57\uFF0C\u8BF7\u5148\u7CBE\u7B80");
   const videoPath = projectFile(root, text(video.path, "\u89C6\u9891\u8DEF\u5F84"));
-  if (![".mp4", ".mov", ".m4v"].includes(import_node_path4.default.extname(videoPath).toLowerCase()) || import_node_fs4.default.statSync(videoPath).size === 0) throw Error("\u8BF7\u9009\u62E9\u975E\u7A7A\u7684 MP4\u3001MOV \u6216 M4V \u89C6\u9891");
+  if (![".mp4", ".mov", ".m4v"].includes(import_node_path3.default.extname(videoPath).toLowerCase()) || import_node_fs3.default.statSync(videoPath).size === 0) throw Error("\u8BF7\u9009\u62E9\u975E\u7A7A\u7684 MP4\u3001MOV \u6216 M4V \u89C6\u9891");
   const hash = (0, import_node_crypto3.createHash)("sha256");
-  for await (const chunk of import_node_fs4.default.createReadStream(videoPath)) hash.update(chunk);
+  for await (const chunk of import_node_fs3.default.createReadStream(videoPath)) hash.update(chunk);
   const videoHash = hash.digest("hex");
   if (video.sha256 && video.sha256 !== videoHash) throw Error("\u6210\u7247\u5DF2\u53D8\u52A8\uFF0C\u8BF7\u5148\u5237\u65B0\u53D1\u5E03\u4FE1\u606F");
   if (!Array.isArray(cover.images)) throw Error("\u7F3A\u5C11\u5C0F\u7EA2\u4E66\u5C01\u9762");
@@ -7818,7 +7726,7 @@ ${attribution}`;
   const selected = portrait.length ? portrait : candidates;
   if (selected.length !== 1) throw Error("\u9700\u8981\u4E00\u5F20\u660E\u786E\u7684\u5C0F\u7EA2\u4E66\u5C01\u9762\uFF0C\u4F18\u5148\u9009\u62E9 3:4 \u5C01\u9762");
   const coverPath = projectFile(root, text(selected[0].path, "\u5C01\u9762\u8DEF\u5F84"));
-  if (![".png", ".jpg", ".jpeg", ".webp"].includes(import_node_path4.default.extname(coverPath).toLowerCase()) || import_node_fs4.default.statSync(coverPath).size === 0) throw Error("\u5C01\u9762\u9700\u8981\u975E\u7A7A\u7684 PNG\u3001JPEG \u6216 WebP \u56FE\u7247");
+  if (![".png", ".jpg", ".jpeg", ".webp"].includes(import_node_path3.default.extname(coverPath).toLowerCase()) || import_node_fs3.default.statSync(coverPath).size === 0) throw Error("\u5C01\u9762\u9700\u8981\u975E\u7A7A\u7684 PNG\u3001JPEG \u6216 WebP \u56FE\u7247");
   return { title, content, tags: normalizedTags, video: videoPath, videoHash, cover: coverPath };
 }
 
@@ -7878,12 +7786,12 @@ function parameter(value, label) {
 }
 function validateRequest(raw) {
   const r = object(raw);
-  for (const key of ["project_root", "data_dir"]) if (typeof r[key] !== "string" || !import_node_path5.default.isAbsolute(r[key])) throw Error(`${key} \u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84`);
+  for (const key of ["project_root", "data_dir"]) if (typeof r[key] !== "string" || !import_node_path4.default.isAbsolute(r[key])) throw Error(`${key} \u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84`);
   const params = object(r.params ?? {}), settings = object(r.settings ?? {});
   for (const key of Object.keys(params)) if (!["account", "name", "request_id"].includes(key)) throw Error(`\u4E0D\u652F\u6301\u53C2\u6570 ${key}\uFF1B\u63D2\u4EF6\u4E0D\u4F1A\u81EA\u52A8\u53D1\u5E03`);
   for (const value of Object.values(params)) if (typeof value !== "string" || value.length > 500) throw Error("\u53C2\u6570\u9700\u8981\u5B57\u7B26\u4E32");
-  if (settings.browser_path !== void 0 && typeof settings.browser_path !== "string") throw Error("\u6D4F\u89C8\u5668\u8DEF\u5F84\u9700\u8981\u5B57\u7B26\u4E32");
-  return { project_root: r.project_root, data_dir: r.data_dir, params, settings };
+  const browser = r.browser === void 0 ? void 0 : validateBridge(r.browser);
+  return { project_root: r.project_root, data_dir: r.data_dir, params, settings, browser };
 }
 async function runOperation(operation, raw, progress = () => {
 }, deps = defaults) {
@@ -7918,15 +7826,16 @@ async function runOperation(operation, raw, progress = () => {
     const result = await withAccountLock(store.profile(account.id), async () => {
       const draft = operation === "prepare" ? await deps.draft(root) : null;
       progress(0.05, `\u6B63\u5728\u6253\u5F00\u300C${account.name}\u300D\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3`);
-      const browser = await deps.open(store.profile(account.id), { executable: request2.settings.browser_path });
+      const browser = await deps.open(store.profile(account.id), { bridge: request2.browser, account: account.id, label: account.name });
       try {
         const page = await deps.page(browser);
-        await page.navigate(page.origin + (draft ? "/publish/publish?from=menu&target=video" : "/"));
-        if (!draft) return { status: "browser_opened", message: `\u5DF2\u6253\u5F00\u300C${account.name}\u300D\uFF0C\u8BF7\u5728\u6D4F\u89C8\u5668\u4E2D\u767B\u5F55\u6216\u67E5\u770B\u8D26\u53F7`, account };
+        if (draft || !browser.reused) await page.navigate(page.origin + (draft ? "/publish/publish?from=menu&target=video" : "/"));
+        if (!draft) return { status: "browser_opened", message: `\u5DF2\u6253\u5F00\u300C${account.name}\u300D\uFF0C\u8BF7\u5728\u7247\u573A\u5185\u767B\u5F55\u6216\u67E5\u770B\u8D26\u53F7`, account };
         const warnings = await deps.prepare(page, draft, (fraction, message) => {
           progress(fraction, message);
           update({ status: "running", message, account });
         });
+        await page.raw("Page.bringToFront");
         return { status: "ready_to_publish", message: "\u5185\u5BB9\u5DF2\u586B\u597D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u6838\u5BF9\u8D26\u53F7\u3001\u5C01\u9762\u548C\u6587\u6848\uFF0C\u518D\u624B\u52A8\u53D1\u5E03", account, warnings, video_sha256: draft.videoHash };
       } finally {
         browser.disconnect();

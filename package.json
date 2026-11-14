@@ -1,9 +1,9 @@
 {
   "name": "onset-plugin-xiaohongshu",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "片场小红书插件：多账号，打开浏览器上传填表，由用户手动发布",
+  "description": "片场小红书插件：客户端内自动上传填写，多账号独立登录，用户检查并发布",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
@@ -12,8 +12,12 @@
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "check": "npm run typecheck && npm test && npm run build"
   },
-  "engines": { "node": ">=22" },
-  "dependencies": { "yaml": "2.9.1" },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
   "devDependencies": {
     "@types/node": "22.20.5",
     "@vitest/coverage-v8": "5.1.0",

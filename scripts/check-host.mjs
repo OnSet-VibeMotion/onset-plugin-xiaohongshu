@@ -15,6 +15,8 @@ try {
     import { checkFiles } from ${JSON.stringify(path.join(host, 'packages/engine/src/flow/fetch.ts'))};
     import { recordInstalled, roleOf } from ${JSON.stringify(path.join(host, 'packages/engine/src/flow/installed.ts'))};
     import { runStationOp } from ${JSON.stringify(path.join(host, 'packages/engine/src/flow/run.ts'))};
+    import { setHostVersion } from ${JSON.stringify(path.join(host, 'packages/engine/src/version/index.ts'))};
+    setHostVersion(JSON.parse(fs.readFileSync(${JSON.stringify(path.join(host, 'apps/desktop/package.json'))}, 'utf8')).version);
     const root = ${JSON.stringify(plugin)};
     const manifest = parseManifest(fs.readFileSync(root + '/onset-station.json', 'utf8'));
     checkFiles(root, manifest);

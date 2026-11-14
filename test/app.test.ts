@@ -4,20 +4,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { runOperation, validateRequest } from '../src/app';
 import { AccountStore } from '../src/accounts';
-import type { CDP, Page } from '../src/cdp';
+import type { BrowserConnection, Page } from '../src/cdp';
 import type { preparePage } from '../src/prepare';
 
 const roots: string[] = [];
 function temp() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'onset-xhs-app-')); roots.push(dir); return dir; }
 afterEach(() => { for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 function setup() {
-  const request = { project_root: temp(), data_dir: temp(), params: {} as Record<string, unknown>, settings: {} };
+  const request = { project_root: temp(), data_dir: temp(), params: {} as Record<string, unknown>, settings: {}, browser: { endpoint: 'http://127.0.0.1:3210/', token: 'a'.repeat(64) } };
   const account = new AccountStore(request.data_dir).add('工作号');
   const disconnect = vi.fn(), navigate = vi.fn();
   const prepare = vi.fn<typeof preparePage>(async () => []);
   const deps = {
-    open: vi.fn(async () => ({ disconnect }) as unknown as CDP),
-    page: vi.fn(async () => ({ navigate, origin: 'https://creator.xiaohongshu.com' }) as unknown as Page),
+    open: vi.fn(async () => ({ disconnect }) as unknown as BrowserConnection),
+    page: vi.fn(async () => ({ navigate, raw: vi.fn(), origin: 'https://creator.xiaohongshu.com' }) as unknown as Page),
     draft: vi.fn(async () => ({ title: '标题', content: '正文', tags: [], video: '/movie.mp4', cover: '/cover.png', videoHash: 'abc' })),
     prepare,
   };
@@ -72,9 +72,22 @@ it('拒绝不合法协议输入、未知操作和自动发布要求', async () =
   for (const input of [null, [], {}, { project_root: '../bad', data_dir: '/tmp' },
     { project_root: '/tmp', data_dir: '/tmp', params: { auto_publish: true } },
     { project_root: '/tmp', data_dir: '/tmp', params: { account: 3 } },
-    { project_root: '/tmp', data_dir: '/tmp', settings: { browser_path: true } },
+    { project_root: '/tmp', data_dir: '/tmp', browser: { endpoint: 'https://remote.example/', token: 'secret' } },
   ]) expect(() => validateRequest(input)).toThrow();
   const { request, deps } = setup();
   await expect(runOperation('publish', request, () => {}, deps)).rejects.toThrow('操作');
   expect(deps.open).not.toHaveBeenCalled();
+});
+
+it('重新打开账号保留用户修改过的页面，不跳回首页', async () => {
+  const { request, account, deps, navigate } = setup();
+  request.params = { account: account.id };
+  deps.open.mockResolvedValueOnce({ disconnect: vi.fn(), reused: true } as unknown as BrowserConnection);
+  await runOperation('open_account', request, () => {}, deps);
+  expect(navigate).not.toHaveBeenCalled();
+});
+it('旧客户端缺内嵌页面连接时明确报错，不启动外部浏览器', async () => {
+  const { request, account } = setup();
+  request.params = { account: account.id };
+  await expect(runOperation('open_account', { ...request, browser: undefined })).rejects.toThrow(/更新片场/);
 });
