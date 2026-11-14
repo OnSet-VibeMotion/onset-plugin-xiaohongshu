@@ -1,0 +1,34 @@
+{
+  "manifest_version": 1,
+  "requires": { "onset": "0.2.0" },
+  "id": "xiaohongshu-upload",
+  "version": "0.1.0",
+  "name": "小红书上传助手",
+  "description": "选择小红书账号，在浏览器中上传成片、封面并填写文案，最后由你手动发布。",
+  "after": "publish",
+  "prompt": "prompt.md",
+  "nodes": [{
+    "id": "xiaohongshu-upload", "label": "上传到小红书", "step": "publish", "page": "accounts",
+    "stale_after": ["publish", "review"],
+    "state": {
+      "file": "production/xiaohongshu/state.json", "json": "status",
+      "cases": [
+        { "is": "ready_to_publish", "status": "done", "detail": "已填写，请在小红书页面手动发布" },
+        { "is": "running", "status": "doing", "detail": "正在准备小红书内容" },
+        { "is": ["error", "interrupted"], "status": "doing", "detail": "请检查小红书窗口或重新准备", "waiting": "user" }
+      ],
+      "missing": { "status": "todo", "waiting": "user" }
+    }
+  }],
+  "produces": [{ "prefix": "production/xiaohongshu/" }],
+  "ops": [
+    { "name": "accounts", "summary": "刷新小红书账号列表", "trigger": "user", "command": ["{node}", "dist/plugin.cjs", "accounts"], "params": { "request_id": { "type": "string", "description": "页面请求编号" } } },
+    { "name": "add_account", "summary": "添加账号并打开小红书登录页", "trigger": "user", "command": ["{node}", "dist/plugin.cjs", "add_account"], "params": { "name": { "type": "string", "description": "账号备注名", "required": true }, "request_id": { "type": "string", "description": "页面请求编号" } } },
+    { "name": "rename_account", "summary": "修改小红书账号备注名", "trigger": "user", "command": ["{node}", "dist/plugin.cjs", "rename_account"], "params": { "account": { "type": "string", "description": "账号编号", "required": true }, "name": { "type": "string", "description": "新的备注名", "required": true }, "request_id": { "type": "string", "description": "页面请求编号" } } },
+    { "name": "open_account", "summary": "打开所选账号的小红书窗口", "trigger": "user", "command": ["{node}", "dist/plugin.cjs", "open_account"], "params": { "account": { "type": "string", "description": "账号编号", "required": true }, "request_id": { "type": "string", "description": "页面请求编号" } } },
+    { "name": "prepare", "summary": "上传视频和封面并填写小红书文案（不提交发布）", "trigger": "user", "command": ["{node}", "dist/plugin.cjs", "prepare"], "params": { "account": { "type": "string", "description": "账号编号", "required": true }, "request_id": { "type": "string", "description": "页面请求编号" } } }
+  ],
+  "pages": [{ "id": "accounts", "label": "小红书", "entry": "ui/index.html", "reads": ["production/xiaohongshu/"] }],
+  "slots": [{ "at": "publish", "page": "accounts", "height": 440 }],
+  "settings": [{ "key": "browser_path", "label": "浏览器程序路径（可选）", "type": "string", "default": "", "description": "通常不用填写，会查找 Chrome 或 Edge。浏览器不会在上传过程中自动安装。" }]
+}

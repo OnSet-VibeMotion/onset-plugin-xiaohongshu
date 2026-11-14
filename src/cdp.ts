@@ -1,0 +1,94 @@
+import * as scripts from './page-scripts';
+type Pending = { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
+export class CDP {
+  private next = 0;
+  private pending = new Map<number, Pending>();
+  private constructor(private socket: WebSocket) {
+    socket.addEventListener('message', event => {
+      const message = JSON.parse(String(event.data));
+      const request = this.pending.get(message.id);
+      if (!request) return;
+      clearTimeout(request.timer); this.pending.delete(message.id);
+      if (message.error) request.reject(Error(message.error.message)); else request.resolve(message.result ?? {});
+    });
+    socket.addEventListener('close', () => this.rejectPending());
+  }
+  static async connect(endpoint: string): Promise<CDP> {
+    const url = new URL(endpoint);
+    if (url.protocol !== 'ws:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw Error('浏览器调试连接必须在本机');
+    const socket = new WebSocket(endpoint);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => { socket.close(); reject(Error('连接浏览器超时')); }, 5000);
+      socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
+      socket.addEventListener('error', () => { clearTimeout(timer); reject(Error('无法连接浏览器')); }, { once: true });
+    });
+    return new CDP(socket);
+  }
+  send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
+    if (this.socket.readyState !== WebSocket.OPEN) return Promise.reject(Error('浏览器窗口已关闭'));
+    const id = ++this.next;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(id); reject(Error(`浏览器操作超时：${method}`)); }, 15_000);
+      this.pending.set(id, { resolve, reject, timer });
+      this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+    });
+  }
+  private rejectPending(): void {
+    for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(Error('浏览器连接已断开')); }
+    this.pending.clear();
+  }
+  /** Disconnect automation only. Never close the user's browser. */
+  disconnect(): void { this.rejectPending(); this.socket.close(); }
+}
+
+export const CreatorOrigin = 'https://creator.xiaohongshu.com';
+export const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+export class Page {
+  private constructor(private cdp: CDP, private sessionId: string, readonly origin: string) {}
+  static async create(cdp: CDP, origin = CreatorOrigin): Promise<Page> {
+    const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank', newWindow: true });
+    const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
+    const page = new Page(cdp, sessionId, origin);
+    await page.raw('Page.enable'); await page.raw('Page.bringToFront');
+    return page;
+  }
+  raw(method: string, params: Record<string, unknown> = {}): Promise<any> { return this.cdp.send(method, params, this.sessionId); }
+  async navigate(url: string): Promise<void> {
+    if (new URL(url).origin !== this.origin) throw Error('只能打开小红书创作者页面');
+    const result = await this.raw('Page.navigate', { url });
+    if (result.errorText) throw Error(`打开小红书失败：${result.errorText}`);
+  }
+  private expression<T, A>(fn: (arg: A) => T, arg: A): string {
+    return `(() => { if (location.origin !== ${JSON.stringify(this.origin)}) throw new Error('页面已离开创作者中心，请重新打开'); return (${fn.toString()})(${JSON.stringify(arg) ?? 'undefined'}); })()`;
+  }
+  async evaluate<T, A = undefined>(fn: (arg: A) => T, arg?: A): Promise<T> {
+    const result = await this.raw('Runtime.evaluate', { expression: this.expression(fn, arg as A), returnByValue: true, awaitPromise: true });
+    if (result.exceptionDetails) throw Error(result.exceptionDetails.exception?.description ?? '页面操作失败');
+    return result.result.value as T;
+  }
+  async waitFor(fn: () => boolean, timeout: number, message = '等待页面超时，请在小红书窗口检查登录或页面状态'): Promise<void> {
+    const deadline = Date.now() + timeout;
+    do {
+      try { if (await this.evaluate(fn)) return; }
+      catch (err) { if (!/context|页面已离开/i.test(String(err))) throw err; }
+      await delay(Math.min(250, timeout));
+    } while (Date.now() < deadline);
+    throw Error(message);
+  }
+  async upload(selector: string, file: string): Promise<void> {
+    const result = await this.raw('Runtime.evaluate', { expression: this.expression(scripts.query, selector) });
+    if (result.exceptionDetails || !result.result.objectId || result.result.subtype === 'null') throw Error('找不到上传控件，页面可能已更新');
+    await this.raw('DOM.setFileInputFiles', { objectId: result.result.objectId, files: [file] });
+    await this.raw('Runtime.releaseObject', { objectId: result.result.objectId });
+  }
+  async click(selector: string, exactText?: string): Promise<boolean> {
+    return this.evaluate(scripts.clickControl, { selector, exactText });
+  }
+  async fillTitle(title: string): Promise<void> {
+    await this.evaluate(scripts.fillTitle, title);
+  }
+  async fillContent(content: string): Promise<void> {
+    await this.evaluate(scripts.selectContent);
+    await this.raw('Input.insertText', { text: content });
+  }
+}

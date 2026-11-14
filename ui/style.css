@@ -1,0 +1,27 @@
+:root { color-scheme: dark light; }
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--text); background: var(--bg); font-family: var(--sans, system-ui); font-size: 14px; }
+main { max-width: 760px; margin: auto; padding: 24px; }
+.eyebrow { color: var(--accent); font-size: 11px; letter-spacing: .14em; }
+h1 { font: 500 24px/1.4 var(--serif, serif); margin: 8px 0; }
+p { color: var(--text-2); line-height: 1.7; margin: 8px 0 20px; }
+section { padding: 16px 0; border-block: 1px solid var(--line); }
+.label-row, .account-row, .actions { display: flex; align-items: center; gap: 12px; }
+.label-row { justify-content: space-between; margin-bottom: 8px; }
+label { font-size: 12px; color: var(--text-2); }
+select, input { min-width: 0; flex: 1; width: 100%; padding: 10px 12px; color: var(--text); background: var(--well, var(--panel)); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+button { padding: 9px 16px; border: 1px solid var(--line); border-radius: 100px; background: transparent; color: var(--text); cursor: pointer; font: inherit; white-space: nowrap; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); color: var(--accent-ink, var(--bg)); border-color: var(--accent); }
+button.quiet { border: 0; padding: 6px 0; color: var(--text-2); font-size: 12px; }
+.actions { margin-top: 14px; }
+.actions span, .muted { font-size: 12px; color: var(--text-3, var(--text-2)); }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--text-2); padding: 8px 0; }
+details label { display: block; margin: 8px 0; }
+#status { margin-top: 16px; color: var(--text-2); line-height: 1.6; }
+#status[data-error="true"] { color: var(--bad); }
+#warnings { padding-left: 20px; color: var(--text-2); line-height: 1.6; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 420px) { main { padding: 16px; } h1 { font-size: 21px; } .actions { align-items: flex-start; flex-direction: column; } .account-row { gap: 8px; } button { padding-inline: 12px; } }
