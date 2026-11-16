@@ -10,9 +10,9 @@ export function validateBridge(value: unknown): BrowserBridge {
   return { endpoint, token };
 }
 
-/** Only controls the page owned by the desktop host. Never launches a separate browser. */
-export async function openBrowser(_profile: string, options: { bridge?: BrowserBridge; account: string; label: string }): Promise<BrowserConnection> {
-  const bridge = validateBridge(options.bridge);
+/** 片场给本次操作的网页连接：打开、查看、关掉片场里的小红书页面。 */
+export function connectBridge(value: unknown) {
+  const bridge = validateBridge(value);
   let connected = true;
   const request = async (body: Record<string, unknown>) => {
     if (!connected) throw Error('网页自动填写已结束');
@@ -24,10 +24,24 @@ export async function openBrowser(_profile: string, options: { bridge?: BrowserB
     if (!response.ok) throw Error(result.error || '客户端网页操作失败');
     return result;
   };
-  const opened = await request({ action: 'open', account: options.account, label: options.label, url: CreatorOrigin + '/' });
+  return {
+    request,
+    /** 移除账号前关掉它开着的页面（别的操作正在用时片场会拒绝）。 */
+    forget: (account: string) => request({ action: 'forget', account }),
+    disconnect() { connected = false; },
+  };
+}
+
+export interface OpenOptions { bridge?: BrowserBridge; account: string; label: string; hint?: string }
+/** Only controls the page owned by the desktop host. Never launches a separate browser. */
+export async function openBrowser(_profile: string, options: OpenOptions): Promise<BrowserConnection> {
+  const bridge = connectBridge(options.bridge);
+  const opened = await bridge.request({ action: 'open', account: options.account, label: options.label, url: CreatorOrigin + '/', ...(options.hint ? { hint: options.hint } : {}) });
   return {
     attached: true, reused: opened.reused === true,
-    send: (method, params = {}) => request({ action: 'command', method, params }),
-    disconnect() { connected = false; },
+    send: (method, params = {}) => bridge.request({ action: 'command', method, params }),
+    state: async () => { const s = await bridge.request({ action: 'state' }); return { open: s.open === true, visible: s.visible === true }; },
+    close: async () => { await bridge.request({ action: 'close' }); },
+    disconnect() { bridge.disconnect(); },
   };
 }

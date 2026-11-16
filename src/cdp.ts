@@ -3,6 +3,10 @@ export interface BrowserConnection {
   attached?: boolean;
   reused?: boolean;
   send(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<any>;
+  /** 片场里的页面还开着、还在前面吗（用户点了「返回片场」就不在前面了）。 */
+  state?(): Promise<{ open: boolean; visible: boolean }>;
+  /** 关掉片场里的这个页面（登录完自动回到片场）。 */
+  close?(): Promise<void>;
   disconnect(): void;
 }
 

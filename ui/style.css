@@ -17,9 +17,8 @@ button.primary { background: var(--accent); color: var(--accent-ink, var(--bg));
 button.quiet { border: 0; padding: 6px 0; color: var(--text-2); font-size: 12px; }
 .actions { margin-top: 14px; }
 .actions span, .muted { font-size: 12px; color: var(--text-3, var(--text-2)); }
-details { margin-top: 12px; }
-summary { cursor: pointer; color: var(--text-2); padding: 8px 0; }
-details label { display: block; margin: 8px 0; }
+.links { display: flex; gap: 16px; }
+#avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; flex: none; }
 #status { margin-top: 16px; color: var(--text-2); line-height: 1.6; }
 #status[data-error="true"] { color: var(--bad); }
 #warnings { padding-left: 20px; color: var(--text-2); line-height: 1.6; }

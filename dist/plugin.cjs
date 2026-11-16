@@ -7420,19 +7420,32 @@ function readSmallJSON(file) {
 
 // src/accounts.ts
 var accountID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-function checkName(value) {
-  const name = value.trim();
-  if (!name || [...name].length > 40 || /[\x00-\x1f\x7f]/.test(name)) throw Error("\u8D26\u53F7\u540D\u79F0\u9700\u8981 1\u201340 \u4E2A\u5B57\uFF0C\u4E0D\u80FD\u6362\u884C");
+var avatarPattern = /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/;
+var MaxAvatarChars = 2e5;
+function newAccountID() {
+  return (0, import_node_crypto2.randomUUID)();
+}
+function cleanName(value) {
+  const name = [...value.replace(/[\x00-\x1f\x7f]/g, " ").trim()].slice(0, 40).join("");
+  if (!name) throw Error("\u8BFB\u4E0D\u5230\u5C0F\u7EA2\u4E66\u6635\u79F0");
   return name;
 }
 var AccountStore = class {
-  root;
   constructor(dataDir) {
+    this.dataDir = dataDir;
     import_node_fs2.default.mkdirSync(dataDir, { recursive: true, mode: 448 });
     this.root = childDirectory(dataDir, "accounts");
   }
+  dataDir;
+  root;
   list() {
-    return import_node_fs2.default.readdirSync(this.root).filter((name) => accountID.test(name)).map((id) => this.get(id)).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+    return import_node_fs2.default.readdirSync(this.root).filter((name) => accountID.test(name)).flatMap((id) => {
+      try {
+        return [this.get(id)];
+      } catch {
+        return [];
+      }
+    }).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
   }
   get(id) {
     if (!accountID.test(id)) throw Error("\u8D26\u53F7\u7F16\u53F7\u65E0\u6548");
@@ -7440,33 +7453,46 @@ var AccountStore = class {
     if (!import_node_fs2.default.existsSync(dir) || import_node_fs2.default.lstatSync(dir).isSymbolicLink()) throw Error("\u627E\u4E0D\u5230\u8FD9\u4E2A\u8D26\u53F7\uFF0C\u8BF7\u5237\u65B0\u8D26\u53F7\u5217\u8868");
     const value = readSmallJSON(import_node_path2.default.join(dir, "account.json"));
     if (value?.id !== id || typeof value.name !== "string" || typeof value.created_at !== "string") throw Error("\u8D26\u53F7\u8D44\u6599\u65E0\u6548");
-    checkName(value.name);
-    return { id, name: value.name, created_at: value.created_at };
+    const account = { id, name: cleanName(value.name), created_at: value.created_at };
+    if (typeof value.user_id === "string" && value.user_id) account.user_id = value.user_id;
+    if (typeof value.avatar === "string" && avatarPattern.test(value.avatar)) account.avatar = value.avatar;
+    return account;
   }
-  add(rawName) {
+  /**
+   * 记下刚登录好的账号。同一个小红书账号（user_id 相同）以前登录过的，旧的那条换成这一条（返回 replaced，调用方去清旧的登录状态）。
+   */
+  saveLoggedIn(input) {
     const release = acquireLock(this.root);
     try {
-      const name = checkName(rawName);
-      if (this.list().some((a) => a.name === name)) throw Error("\u5DF2\u6709\u540C\u540D\u8D26\u53F7\uFF0C\u8BF7\u76F4\u63A5\u9009\u62E9\u6216\u6362\u4E00\u4E2A\u540D\u79F0");
-      const account = { id: (0, import_node_crypto2.randomUUID)(), name, created_at: (/* @__PURE__ */ new Date()).toISOString() };
+      if (!accountID.test(input.id)) throw Error("\u8D26\u53F7\u7F16\u53F7\u65E0\u6548");
+      const account = { id: input.id, name: cleanName(input.name), created_at: (/* @__PURE__ */ new Date()).toISOString() };
+      if (input.user_id) account.user_id = String(input.user_id).slice(0, 80);
+      if (input.avatar && avatarPattern.test(input.avatar) && input.avatar.length <= MaxAvatarChars) account.avatar = input.avatar;
+      const replaced = account.user_id ? this.list().find((a) => a.user_id === account.user_id && a.id !== account.id) : void 0;
+      if (replaced) account.created_at = replaced.created_at;
       const dir = childDirectory(this.root, account.id);
       atomicJSON(import_node_path2.default.join(dir, "account.json"), account);
+      if (replaced) this.removeFiles(replaced.id);
+      return { account, ...replaced ? { replaced } : {} };
+    } finally {
+      release();
+    }
+  }
+  remove(id) {
+    const release = acquireLock(this.root);
+    try {
+      const account = this.get(id);
+      this.removeFiles(id);
       return account;
     } finally {
       release();
     }
   }
-  rename(id, rawName) {
-    const release = acquireLock(this.root);
-    try {
-      const account = this.get(id), name = checkName(rawName);
-      if (this.list().some((a) => a.id !== id && a.name === name)) throw Error("\u5DF2\u6709\u540C\u540D\u8D26\u53F7");
-      const renamed = { ...account, name };
-      atomicJSON(import_node_path2.default.join(this.root, id, "account.json"), renamed);
-      return renamed;
-    } finally {
-      release();
-    }
+  /** 删掉账号资料与它的登录状态（片场开的网页存储）。 */
+  removeFiles(id) {
+    if (!accountID.test(id)) throw Error("\u8D26\u53F7\u7F16\u53F7\u65E0\u6548");
+    import_node_fs2.default.rmSync(import_node_path2.default.join(this.root, id), { recursive: true, force: true });
+    import_node_fs2.default.rmSync(import_node_path2.default.join(import_node_fs2.default.realpathSync(this.dataDir), "web-sessions", id), { recursive: true, force: true });
   }
   profile(id) {
     this.get(id);
@@ -7561,6 +7587,34 @@ function selectContent() {
   selection.removeAllRanges();
   selection.addRange(range);
 }
+async function loginInfo() {
+  if (/login/i.test(location.pathname)) return null;
+  const find = (value, key, ok, depth = 0) => {
+    if (!value || typeof value !== "object" || depth > 5) return "";
+    for (const [k, v] of Object.entries(value)) if (typeof v === "string" && key.test(k) && ok(v.trim())) return v.trim();
+    for (const v of Object.values(value)) {
+      const found = find(v, key, ok, depth + 1);
+      if (found) return found;
+    }
+    return "";
+  };
+  const url = (v) => /^https:\/\//.test(v);
+  try {
+    const response = await fetch("/api/galaxy/creator/home/personal_info", { credentials: "include" });
+    if (response.ok) {
+      const json = await response.json();
+      const name2 = find(json, /^(name|nick_?name|user_?name|nickName|userName)$/i, (v) => v.length > 0 && v.length <= 60);
+      if (name2) return { name: name2, avatar: find(json, /avatar|image/i, url), user_id: find(json, /^(user_?id|userId|red_?id|redId)$/i, (v) => v.length > 0 && v.length <= 80) };
+    }
+  } catch {
+  }
+  const visible = (e) => e.getClientRects().length > 0;
+  const avatar = [...document.querySelectorAll("img")].find((i) => visible(i) && /avatar/i.test(`${i.className} ${i.src} ${i.parentElement?.className ?? ""}`));
+  const nameEl = [...document.querySelectorAll('[class*="name" i], [class*="nick" i]')].find((e) => visible(e) && !e.querySelector("*") && (e.textContent ?? "").trim().length > 0 && (e.textContent ?? "").trim().length <= 40);
+  const name = nameEl?.textContent?.trim() ?? "";
+  if (!name || !avatar) return null;
+  return { name, avatar: url(avatar.src) ? avatar.src : "", user_id: "" };
+}
 
 // src/cdp.ts
 var CreatorOrigin = "https://creator.xiaohongshu.com";
@@ -7643,8 +7697,8 @@ function validateBridge(value) {
   if (url.protocol !== "http:" || url.hostname !== "127.0.0.1" || !url.port || url.pathname !== "/" || url.search || url.hash || url.username || url.password) throw Error("\u5BA2\u6237\u7AEF\u7F51\u9875\u8FDE\u63A5\u5FC5\u987B\u662F\u672C\u673A\u7684\u4E34\u65F6\u8FDE\u63A5");
   return { endpoint, token };
 }
-async function openBrowser(_profile, options) {
-  const bridge = validateBridge(options.bridge);
+function connectBridge(value) {
+  const bridge = validateBridge(value);
   let connected = true;
   const request2 = async (body) => {
     if (!connected) throw Error("\u7F51\u9875\u81EA\u52A8\u586B\u5199\u5DF2\u7ED3\u675F");
@@ -7659,13 +7713,31 @@ async function openBrowser(_profile, options) {
     if (!response.ok) throw Error(result.error || "\u5BA2\u6237\u7AEF\u7F51\u9875\u64CD\u4F5C\u5931\u8D25");
     return result;
   };
-  const opened = await request2({ action: "open", account: options.account, label: options.label, url: CreatorOrigin + "/" });
+  return {
+    request: request2,
+    /** 移除账号前关掉它开着的页面（别的操作正在用时片场会拒绝）。 */
+    forget: (account) => request2({ action: "forget", account }),
+    disconnect() {
+      connected = false;
+    }
+  };
+}
+async function openBrowser(_profile, options) {
+  const bridge = connectBridge(options.bridge);
+  const opened = await bridge.request({ action: "open", account: options.account, label: options.label, url: CreatorOrigin + "/", ...options.hint ? { hint: options.hint } : {} });
   return {
     attached: true,
     reused: opened.reused === true,
-    send: (method, params = {}) => request2({ action: "command", method, params }),
+    send: (method, params = {}) => bridge.request({ action: "command", method, params }),
+    state: async () => {
+      const s = await bridge.request({ action: "state" });
+      return { open: s.open === true, visible: s.visible === true };
+    },
+    close: async () => {
+      await bridge.request({ action: "close" });
+    },
     disconnect() {
-      connected = false;
+      bridge.disconnect();
     }
   };
 }
@@ -7774,8 +7846,18 @@ async function preparePage(page, draft, progress, options = {}) {
 }
 
 // src/app.ts
-var operations = ["accounts", "add_account", "rename_account", "open_account", "prepare"];
-var defaults = { open: openBrowser, page: Page.create, draft: readDraft, prepare: preparePage };
+var operations = ["accounts", "login", "open_account", "remove_account", "sync_accounts", "prepare"];
+async function fetchAvatar(raw) {
+  const url = new URL(raw);
+  if (url.protocol !== "https:" || !/(^|\.)(xhscdn\.com|xiaohongshu\.com)$/.test(url.hostname)) return "";
+  const response = await fetch(url, { signal: AbortSignal.timeout(1e4), redirect: "follow" });
+  const type = (response.headers.get("content-type") ?? "").split(";")[0].trim();
+  if (!response.ok || !/^image\/(png|jpeg|gif|webp)$/.test(type)) return "";
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const dataURL = `data:${type};base64,${bytes.toString("base64")}`;
+  return dataURL.length <= MaxAvatarChars ? dataURL : "";
+}
+var defaults = { open: openBrowser, page: Page.create, draft: readDraft, prepare: preparePage, avatar: fetchAvatar, sleep: delay, bridge: connectBridge, loginTimeout: 10 * 6e4 };
 function object(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("\u63D2\u4EF6\u8F93\u5165\u5FC5\u987B\u662F JSON \u5BF9\u8C61");
   return value;
@@ -7786,12 +7868,27 @@ function parameter(value, label) {
 }
 function validateRequest(raw) {
   const r = object(raw);
-  for (const key of ["project_root", "data_dir"]) if (typeof r[key] !== "string" || !import_node_path4.default.isAbsolute(r[key])) throw Error(`${key} \u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84`);
+  if (typeof r.data_dir !== "string" || !import_node_path4.default.isAbsolute(r.data_dir)) throw Error("data_dir \u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84");
+  if (typeof r.project_root !== "string" || r.project_root !== "" && !import_node_path4.default.isAbsolute(r.project_root)) throw Error("project_root \u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84");
   const params = object(r.params ?? {}), settings = object(r.settings ?? {});
-  for (const key of Object.keys(params)) if (!["account", "name", "request_id"].includes(key)) throw Error(`\u4E0D\u652F\u6301\u53C2\u6570 ${key}\uFF1B\u63D2\u4EF6\u4E0D\u4F1A\u81EA\u52A8\u53D1\u5E03`);
+  for (const key of Object.keys(params)) if (!["account"].includes(key)) throw Error(`\u4E0D\u652F\u6301\u53C2\u6570 ${key}\uFF1B\u63D2\u4EF6\u4E0D\u4F1A\u81EA\u52A8\u53D1\u5E03`);
   for (const value of Object.values(params)) if (typeof value !== "string" || value.length > 500) throw Error("\u53C2\u6570\u9700\u8981\u5B57\u7B26\u4E32");
   const browser = r.browser === void 0 ? void 0 : validateBridge(r.browser);
   return { project_root: r.project_root, data_dir: r.data_dir, params, settings, browser };
+}
+function accountItems(accounts) {
+  return accounts.map((a) => ({
+    title: a.name,
+    detail: `\u767B\u5F55\u4E8E ${a.created_at.slice(0, 10)}`,
+    ...a.avatar ? { image: a.avatar } : {},
+    actions: [
+      { label: "\u6253\u5F00", op: "open_account", params: { account: a.id } },
+      { label: "\u79FB\u9664", op: "remove_account", params: { account: a.id }, confirm: `\u79FB\u9664\u300C${a.name}\u300D\u540E\u8981\u91CD\u65B0\u767B\u5F55\uFF0C\u786E\u5B9A\u5417\uFF1F` }
+    ]
+  }));
+}
+function snapshotAccounts(accounts) {
+  return { accounts: accounts.map((a) => ({ id: a.id, name: a.name, created_at: a.created_at, ...a.avatar ? { avatar: a.avatar } : {} })) };
 }
 async function runOperation(operation, raw, progress = () => {
 }, deps = defaults) {
@@ -7800,25 +7897,46 @@ async function runOperation(operation, raw, progress = () => {
   const { project_root: root, params } = request2;
   const store = new AccountStore(request2.data_dir);
   let account;
-  const snapshot = () => writeProjectJSON(root, "production/xiaohongshu/accounts.json", { accounts: store.list() });
+  if (!root && (operation === "prepare" || operation === "sync_accounts")) throw Error("\u8981\u5728\u9879\u76EE\u91CC\u8FDB\u884C\uFF1A\u5148\u5728\u7247\u573A\u6253\u5F00\u8FD9\u4E2A\u9879\u76EE");
+  const snapshot = () => {
+    if (root) writeProjectJSON(root, "production/xiaohongshu/accounts.json", snapshotAccounts(store.list()));
+  };
   const update = (result) => {
-    writeProjectJSON(root, "production/xiaohongshu/latest.json", { ...result, operation, request_id: params.request_id ?? "", updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+    if (!root || operation === "accounts") return;
+    writeProjectJSON(root, "production/xiaohongshu/latest.json", { status: result.status, message: result.message, ...result.account ? { account: { id: result.account.id, name: result.account.name } } : {}, ...result.warnings ? { warnings: result.warnings } : {}, operation, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
     if (operation === "prepare") writeProjectJSON(root, "production/xiaohongshu/state.json", { ...result, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
   };
   try {
-    update({ status: "running", message: "\u6B63\u5728\u51C6\u5907\u2026" });
     if (operation === "accounts") {
+      const accounts = store.list();
+      return { status: "accounts_loaded", message: accounts.length ? `${accounts.length} \u4E2A\u8D26\u53F7` : "\u8FD8\u6CA1\u6709\u8D26\u53F7", items: accountItems(accounts) };
+    }
+    update({ status: "running", message: operation === "login" ? "\u6B63\u5728\u6253\u5F00\u5C0F\u7EA2\u4E66\u767B\u5F55\u9875\u2026" : "\u6B63\u5728\u51C6\u5907\u2026" });
+    if (operation === "sync_accounts") {
       snapshot();
-      const result2 = { status: "accounts_loaded", message: "\u8D26\u53F7\u5217\u8868\u5DF2\u5237\u65B0" };
+      const result2 = { status: "accounts_loaded", message: store.list().length ? "\u8D26\u53F7\u5217\u8868\u5DF2\u5237\u65B0" : "\u8FD8\u6CA1\u6709\u8D26\u53F7\uFF0C\u5148\u767B\u5F55\u4E00\u4E2A" };
       update(result2);
       return result2;
     }
-    if (operation === "add_account") account = store.add(parameter(params.name, "\u8D26\u53F7\u540D\u79F0"));
-    else account = store.get(parameter(params.account, "\u8D26\u53F7"));
-    if (operation === "rename_account") {
-      account = store.rename(account.id, parameter(params.name, "\u8D26\u53F7\u540D\u79F0"));
+    if (operation === "login") {
+      const result2 = await login(request2, store, progress, deps);
       snapshot();
-      const result2 = { status: "renamed", message: "\u8D26\u53F7\u540D\u79F0\u5DF2\u66F4\u65B0\uFF0C\u767B\u5F55\u72B6\u6001\u4FDD\u7559", account };
+      update(result2);
+      return result2;
+    }
+    account = store.get(parameter(params.account, "\u8D26\u53F7"));
+    if (operation === "remove_account") {
+      if (request2.browser) {
+        const bridge = deps.bridge(request2.browser);
+        try {
+          await bridge.forget(account.id);
+        } finally {
+          bridge.disconnect();
+        }
+      }
+      store.remove(account.id);
+      snapshot();
+      const result2 = { status: "removed", message: `\u5DF2\u79FB\u9664\u300C${account.name}\u300D` };
       update(result2);
       return result2;
     }
@@ -7826,11 +7944,11 @@ async function runOperation(operation, raw, progress = () => {
     const result = await withAccountLock(store.profile(account.id), async () => {
       const draft = operation === "prepare" ? await deps.draft(root) : null;
       progress(0.05, `\u6B63\u5728\u6253\u5F00\u300C${account.name}\u300D\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3`);
-      const browser = await deps.open(store.profile(account.id), { bridge: request2.browser, account: account.id, label: account.name });
+      const browser = await deps.open(store.profile(account.id), { bridge: request2.browser, account: account.id, label: account.name, hint: draft ? "\u8BF7\u68C0\u67E5\u8D26\u53F7\u4E0E\u5185\u5BB9\uFF0C\u53D1\u5E03\u7531\u4F60\u786E\u8BA4" : "\u8FD9\u662F\u8FD9\u4E2A\u8D26\u53F7\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3" });
       try {
         const page = await deps.page(browser);
         if (draft || !browser.reused) await page.navigate(page.origin + (draft ? "/publish/publish?from=menu&target=video" : "/"));
-        if (!draft) return { status: "browser_opened", message: `\u5DF2\u6253\u5F00\u300C${account.name}\u300D\uFF0C\u8BF7\u5728\u7247\u573A\u5185\u767B\u5F55\u6216\u67E5\u770B\u8D26\u53F7`, account };
+        if (!draft) return { status: "browser_opened", message: `\u5DF2\u6253\u5F00\u300C${account.name}\u300D\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3`, account };
         const warnings = await deps.prepare(page, draft, (fraction, message) => {
           progress(fraction, message);
           update({ status: "running", message, account });
@@ -7849,12 +7967,49 @@ async function runOperation(operation, raw, progress = () => {
     throw err;
   }
 }
+async function login(request2, store, progress, deps) {
+  const id = newAccountID();
+  progress(0.05, "\u6B63\u5728\u6253\u5F00\u5C0F\u7EA2\u4E66\u767B\u5F55\u9875");
+  const browser = await deps.open("", { bridge: request2.browser, account: id, label: "\u767B\u5F55", hint: "\u8BF7\u5728\u4E0B\u65B9\u767B\u5F55\u5C0F\u7EA2\u4E66\uFF0C\u767B\u5F55\u540E\u4F1A\u81EA\u52A8\u56DE\u5230\u7247\u573A" });
+  let saved = false;
+  try {
+    const page = await deps.page(browser);
+    await page.navigate(page.origin + "/");
+    progress(0.1, "\u7B49\u4F60\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u767B\u5F55\u2026");
+    const deadline = Date.now() + deps.loginTimeout;
+    let info = null;
+    for (; ; ) {
+      if (Date.now() > deadline) throw Error("\u7B49\u4E86\u5341\u5206\u949F\u8FD8\u6CA1\u767B\u5F55\uFF0C\u8FD9\u6B21\u6CA1\u6709\u6DFB\u52A0\u8D26\u53F7");
+      const state = await browser.state?.();
+      if (state && (!state.open || !state.visible)) throw Error("\u767B\u5F55\u9875\u9762\u5173\u6389\u4E86\uFF0C\u8FD9\u6B21\u6CA1\u6709\u6DFB\u52A0\u8D26\u53F7");
+      try {
+        info = await page.evaluate(loginInfo);
+      } catch {
+        info = null;
+      }
+      if (info?.name) break;
+      await deps.sleep(1500);
+    }
+    progress(0.9, `\u5DF2\u767B\u5F55\u300C${info.name}\u300D\uFF0C\u6B63\u5728\u8BFB\u53D6\u5934\u50CF`);
+    const avatar = info.avatar ? await deps.avatar(info.avatar).catch(() => "") : "";
+    const { account, replaced } = store.saveLoggedIn({ id, name: info.name, user_id: info.user_id, avatar });
+    saved = true;
+    await browser.close?.().catch(() => {
+    });
+    return { status: "logged_in", message: replaced ? `\u300C${account.name}\u300D\u91CD\u65B0\u767B\u5F55\u597D\u4E86` : `\u5DF2\u767B\u5F55\uFF1A${account.name}`, account };
+  } finally {
+    if (!saved) await browser.close?.().catch(() => {
+    });
+    browser.disconnect();
+    if (!saved) store.removeFiles(id);
+  }
+}
 
 // src/entry.ts
 var request;
 for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => {
-  if (request) {
-    const result = { status: "interrupted", message: "\u64CD\u4F5C\u5DF2\u53D6\u6D88\uFF0C\u5C0F\u7EA2\u4E66\u7A97\u53E3\u4ECD\u4FDD\u7559\uFF0C\u8BF7\u81EA\u884C\u68C0\u67E5", request_id: request.params.request_id ?? "" };
+  if (request?.project_root) {
+    const result = { status: "interrupted", message: "\u64CD\u4F5C\u5DF2\u53D6\u6D88\uFF0C\u5C0F\u7EA2\u4E66\u7A97\u53E3\u4ECD\u4FDD\u7559\uFF0C\u8BF7\u81EA\u884C\u68C0\u67E5", updated_at: (/* @__PURE__ */ new Date()).toISOString() };
     try {
       writeProjectJSON(request.project_root, "production/xiaohongshu/latest.json", result);
       if (process.argv[2] === "prepare") writeProjectJSON(request.project_root, "production/xiaohongshu/state.json", result);
@@ -7876,6 +8031,8 @@ async function main() {
     process.stdout.write(`onset-progress ${fraction.toFixed(2)} ${message.replace(/[\r\n]/g, " ")}
 `);
   });
+  process.stdout.write(`${result.message.replace(/[\r\n]/g, " ")}
+`);
   process.stdout.write(`onset-result ${JSON.stringify(result)}
 `);
 }

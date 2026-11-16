@@ -1,18 +1,31 @@
 import path from 'node:path';
-import { AccountStore, withAccountLock, type Account } from './accounts';
-import { openBrowser, validateBridge, type BrowserBridge } from './browser';
-import { Page } from './cdp';
+import { AccountStore, MaxAvatarChars, newAccountID, withAccountLock, type Account } from './accounts';
+import { connectBridge, openBrowser, validateBridge, type BrowserBridge } from './browser';
+import { delay, Page } from './cdp';
+import * as scripts from './page-scripts';
 import { readDraft } from './draft';
 import { writeProjectJSON } from './files';
 import { preparePage, type Progress } from './prepare';
 
 export interface Request {
+  /** 空字符串：没打开项目时从片场设置里点的账号操作，不往项目里写任何东西。 */
   project_root: string; data_dir: string; browser?: BrowserBridge;
   params: Record<string, unknown>; settings: Record<string, unknown>;
 }
-export interface Result { status: string; message: string; account?: Account; warnings?: string[]; video_sha256?: string }
-const operations = ['accounts', 'add_account', 'rename_account', 'open_account', 'prepare'];
-const defaults = { open: openBrowser, page: Page.create, draft: readDraft, prepare: preparePage };
+export interface Result { status: string; message: string; account?: Account; warnings?: string[]; video_sha256?: string; items?: unknown[] }
+const operations = ['accounts', 'login', 'open_account', 'remove_account', 'sync_accounts', 'prepare'];
+/** 小红书 CDN 上的头像：插件进程取回来存成 data URL，片场与插件页面都只认这种图片。 */
+async function fetchAvatar(raw: string): Promise<string> {
+  const url = new URL(raw);
+  if (url.protocol !== 'https:' || !/(^|\.)(xhscdn\.com|xiaohongshu\.com)$/.test(url.hostname)) return '';
+  const response = await fetch(url, { signal: AbortSignal.timeout(10_000), redirect: 'follow' });
+  const type = (response.headers.get('content-type') ?? '').split(';')[0].trim();
+  if (!response.ok || !/^image\/(png|jpeg|gif|webp)$/.test(type)) return '';
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const dataURL = `data:${type};base64,${bytes.toString('base64')}`;
+  return dataURL.length <= MaxAvatarChars ? dataURL : '';
+}
+const defaults = { open: openBrowser, page: Page.create, draft: readDraft, prepare: preparePage, avatar: fetchAvatar, sleep: delay, bridge: connectBridge, loginTimeout: 10 * 60_000 };
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('插件输入必须是 JSON 对象');
   return value as Record<string, unknown>;
@@ -23,12 +36,30 @@ function parameter(value: unknown, label: string): string {
 }
 export function validateRequest(raw: unknown): Request {
   const r = object(raw);
-  for (const key of ['project_root', 'data_dir']) if (typeof r[key] !== 'string' || !path.isAbsolute(r[key] as string)) throw Error(`${key} 需要绝对路径`);
+  if (typeof r.data_dir !== 'string' || !path.isAbsolute(r.data_dir)) throw Error('data_dir 需要绝对路径');
+  if (typeof r.project_root !== 'string' || (r.project_root !== '' && !path.isAbsolute(r.project_root))) throw Error('project_root 需要绝对路径');
   const params = object(r.params ?? {}), settings = object(r.settings ?? {});
-  for (const key of Object.keys(params)) if (!['account', 'name', 'request_id'].includes(key)) throw Error(`不支持参数 ${key}；插件不会自动发布`);
+  for (const key of Object.keys(params)) if (!['account'].includes(key)) throw Error(`不支持参数 ${key}；插件不会自动发布`);
   for (const value of Object.values(params)) if (typeof value !== 'string' || value.length > 500) throw Error('参数需要字符串');
   const browser = r.browser === undefined ? undefined : validateBridge(r.browser);
-  return { project_root: r.project_root as string, data_dir: r.data_dir as string, params, settings, browser };
+  return { project_root: r.project_root, data_dir: r.data_dir, params, settings, browser };
+}
+
+/** 设置里的账号卡片：头像、昵称、「打开」「移除」。 */
+function accountItems(accounts: Account[]): unknown[] {
+  return accounts.map(a => ({
+    title: a.name,
+    detail: `登录于 ${a.created_at.slice(0, 10)}`,
+    ...(a.avatar ? { image: a.avatar } : {}),
+    actions: [
+      { label: '打开', op: 'open_account', params: { account: a.id } },
+      { label: '移除', op: 'remove_account', params: { account: a.id }, confirm: `移除「${a.name}」后要重新登录，确定吗？` },
+    ],
+  }));
+}
+/** 写进项目给插件页面看的账号快照：不含登录状态，只有名字与头像。 */
+function snapshotAccounts(accounts: Account[]) {
+  return { accounts: accounts.map(a => ({ id: a.id, name: a.name, created_at: a.created_at, ...(a.avatar ? { avatar: a.avatar } : {}) })) };
 }
 
 export async function runOperation(operation: string, raw: unknown, progress: Progress = () => {}, deps = defaults): Promise<Result> {
@@ -37,31 +68,41 @@ export async function runOperation(operation: string, raw: unknown, progress: Pr
   const { project_root: root, params } = request;
   const store = new AccountStore(request.data_dir);
   let account: Account | undefined;
-  const snapshot = () => writeProjectJSON(root, 'production/xiaohongshu/accounts.json', { accounts: store.list() });
+  if (!root && (operation === 'prepare' || operation === 'sync_accounts')) throw Error('要在项目里进行：先在片场打开这个项目');
+  // 没打开项目时（project_root 为空）账号只记在插件自己的数据目录，不写项目快照。
+  const snapshot = () => { if (root) writeProjectJSON(root, 'production/xiaohongshu/accounts.json', snapshotAccounts(store.list())); };
   const update = (result: Result) => {
-    writeProjectJSON(root, 'production/xiaohongshu/latest.json', { ...result, operation, request_id: params.request_id ?? '', updated_at: new Date().toISOString() });
+    if (!root || operation === 'accounts') return;
+    writeProjectJSON(root, 'production/xiaohongshu/latest.json', { status: result.status, message: result.message, ...(result.account ? { account: { id: result.account.id, name: result.account.name } } : {}), ...(result.warnings ? { warnings: result.warnings } : {}), operation, updated_at: new Date().toISOString() });
     if (operation === 'prepare') writeProjectJSON(root, 'production/xiaohongshu/state.json', { ...result, updated_at: new Date().toISOString() });
   };
   try {
-    update({ status: 'running', message: '正在准备…' });
     if (operation === 'accounts') {
-      snapshot(); const result = { status: 'accounts_loaded', message: '账号列表已刷新' }; update(result); return result;
+      const accounts = store.list();
+      return { status: 'accounts_loaded', message: accounts.length ? `${accounts.length} 个账号` : '还没有账号', items: accountItems(accounts) };
     }
-    if (operation === 'add_account') account = store.add(parameter(params.name, '账号名称'));
-    else account = store.get(parameter(params.account, '账号'));
-    if (operation === 'rename_account') {
-      account = store.rename(account.id, parameter(params.name, '账号名称')); snapshot();
-      const result = { status: 'renamed', message: '账号名称已更新，登录状态保留', account }; update(result); return result;
+    update({ status: 'running', message: operation === 'login' ? '正在打开小红书登录页…' : '正在准备…' });
+    if (operation === 'sync_accounts') {
+      snapshot();
+      const result = { status: 'accounts_loaded', message: store.list().length ? '账号列表已刷新' : '还没有账号，先登录一个' };
+      update(result); return result;
+    }
+    if (operation === 'login') { const result = await login(request, store, progress, deps); snapshot(); update(result); return result; }
+    account = store.get(parameter(params.account, '账号'));
+    if (operation === 'remove_account') {
+      if (request.browser) { const bridge = deps.bridge(request.browser); try { await bridge.forget(account.id); } finally { bridge.disconnect(); } }
+      store.remove(account.id); snapshot();
+      const result = { status: 'removed', message: `已移除「${account.name}」` }; update(result); return result;
     }
     snapshot();
     const result = await withAccountLock(store.profile(account.id), async (): Promise<Result> => {
       const draft = operation === 'prepare' ? await deps.draft(root) : null;
       progress(0.05, `正在打开「${account!.name}」的小红书窗口`);
-      const browser = await deps.open(store.profile(account!.id), { bridge: request.browser, account: account!.id, label: account!.name });
+      const browser = await deps.open(store.profile(account!.id), { bridge: request.browser, account: account!.id, label: account!.name, hint: draft ? '请检查账号与内容，发布由你确认' : '这是这个账号的小红书窗口' });
       try {
         const page = await deps.page(browser);
         if (draft || !browser.reused) await page.navigate(page.origin + (draft ? '/publish/publish?from=menu&target=video' : '/'));
-        if (!draft) return { status: 'browser_opened', message: `已打开「${account!.name}」，请在片场内登录或查看账号`, account };
+        if (!draft) return { status: 'browser_opened', message: `已打开「${account!.name}」的小红书窗口`, account };
         const warnings = await deps.prepare(page, draft, (fraction, message) => {
           progress(fraction, message); update({ status: 'running', message, account });
         });
@@ -74,5 +115,42 @@ export async function runOperation(operation: string, raw: unknown, progress: Pr
     const message = err instanceof Error ? err.message : '操作失败';
     update({ status: 'error', message, account });
     throw err;
+  }
+}
+
+/**
+ * 登录：给新账号开一个独立的网页存储，打开小红书，等用户在片场里的页面登录好，读出昵称与头像记下来，再把页面关掉回到片场。
+ * 用户点「返回片场」收起页面、或十分钟没登录，就当不登了，新开的存储一起删掉。
+ */
+async function login(request: Request, store: AccountStore, progress: Progress, deps: typeof defaults): Promise<Result> {
+  const id = newAccountID();
+  progress(0.05, '正在打开小红书登录页');
+  const browser = await deps.open('', { bridge: request.browser, account: id, label: '登录', hint: '请在下方登录小红书，登录后会自动回到片场' });
+  let saved = false;
+  try {
+    const page = await deps.page(browser);
+    await page.navigate(page.origin + '/');
+    progress(0.1, '等你在小红书页面登录…');
+    const deadline = Date.now() + deps.loginTimeout;
+    let info: { name: string; avatar: string; user_id: string } | null = null;
+    for (;;) {
+      if (Date.now() > deadline) throw Error('等了十分钟还没登录，这次没有添加账号');
+      const state = await browser.state?.();
+      if (state && (!state.open || !state.visible)) throw Error('登录页面关掉了，这次没有添加账号');
+      try { info = await page.evaluate(scripts.loginInfo); } catch { info = null; } // 跳转中、还在别的小红书页面：下一轮再看
+      if (info?.name) break;
+      await deps.sleep(1500);
+    }
+    progress(0.9, `已登录「${info.name}」，正在读取头像`);
+    const avatar = info.avatar ? await deps.avatar(info.avatar).catch(() => '') : '';
+    const { account, replaced } = store.saveLoggedIn({ id, name: info.name, user_id: info.user_id, avatar });
+    saved = true;
+    await browser.close?.().catch(() => {});
+    return { status: 'logged_in', message: replaced ? `「${account.name}」重新登录好了` : `已登录：${account.name}`, account };
+  } finally {
+    // 没登录成：关掉页面，删掉为它开的存储，账号列表里不留半截的账号。
+    if (!saved) await browser.close?.().catch(() => {});
+    browser.disconnect();
+    if (!saved) store.removeFiles(id);
   }
 }

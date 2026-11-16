@@ -6,8 +6,11 @@ import http from 'node:http';
 import { openBrowser, findBrowser } from './support/browser';
 import { CDP, Page } from '../src/cdp';
 import { preparePage } from '../src/prepare';
+import * as scripts from '../src/page-scripts';
 
 let root: string, origin: string, server: http.Server;
+/** 登录检测用：创作者中心接口这次回什么（null 表示 404）。 */
+let personalInfo: unknown = null;
 const browsers: Awaited<ReturnType<typeof openBrowser>>[] = [];
 const fixture = fs.readFileSync(new URL('./fixtures/creator.html', import.meta.url), 'utf8');
 beforeAll(async () => {
@@ -16,12 +19,21 @@ beforeAll(async () => {
     const files: Record<string, [string, string]> = { '/ui/': ['ui/index.html', 'text/html'], '/ui/app.js': ['ui/app.js', 'text/javascript'], '/ui/style.css': ['ui/style.css', 'text/css'] };
     const route = files[req.url ?? ''];
     if (route) { res.setHeader('Content-Type', route[1] + '; charset=utf-8'); res.end(fs.readFileSync(route[0])); return; }
+    if (req.url === '/api/galaxy/creator/home/personal_info') {
+      if (personalInfo === null) { res.writeHead(404).end('{}'); return; }
+      res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(personalInfo)); return;
+    }
+    if (req.url === '/login' || req.url === '/new/home') {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.end(req.url === '/login' ? '<!doctype html><p>扫码登录</p>' : '<!doctype html><header><img class="user-avatar" src="https://sns-avatar-qc.xhscdn.com/dom.jpg" width="32" height="32"><span class="user-name">页面昵称</span></header>');
+      return;
+    }
     if (req.url === '/station-ui/_sdk.js') {
       res.setHeader('Content-Type', 'text/javascript'); res.end(`
         document.documentElement.style.cssText='--text:#eee8dd;--bg:#17191b;--panel:#25272a;--well:#202224;--line:#3b3d40;--accent:#ccb486;--accent-ink:#17191b;--text-2:#b3b0a9;--text-3:#96928b;--bad:#e98c80';
         window.calls=[]; window.latest=null;
         window.onset={ready:Promise.resolve(),onRefresh:()=>{},read:async p=>({text:JSON.stringify(p.includes('accounts')?{accounts:[{id:'a',name:'个人号'},{id:'b',name:'工作号'}]}:window.latest)}),
-        run:async(op,params)=>{calls.push({op,params});window.latest={status:'ready_to_publish',request_id:params.request_id,message:'内容已填好，请在小红书页面手动发布',account:{id:params.account},warnings:[]};return {started:true};}};
+        run:async(op,params)=>{calls.push({op,params});window.latest={status:'ready_to_publish',updated_at:new Date(Date.now()+1000).toISOString(),message:'内容已填好，请在小红书页面手动发布',account:{id:params.account},warnings:[]};return {started:true};}};
       `); return;
     }
     res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(fixture);
@@ -141,4 +153,15 @@ it('插件页面选中工作号后只请求上传准备，并显示手动发布�
   await page.raw('Emulation.setDeviceMetricsOverride', { width: 720, height: 620, deviceScaleFactor: 1, mobile: false });
   const screenshot = await page.raw('Page.captureScreenshot', { format: 'png' });
   fs.mkdirSync('test-results', { recursive: true }); fs.writeFileSync('test-results/plugin-ui.png', Buffer.from(screenshot.data, 'base64'));
+});
+
+it('认出登录了没有、登录的是谁：登录页不算；先读创作者中心接口，读不到再读页面上的头像与昵称', async () => {
+  const { page } = await pageFor('login-info');
+  await page.navigate(origin + '/login');
+  expect(await page.evaluate(scripts.loginInfo)).toBeNull();
+  await page.navigate(origin + '/new/home');
+  personalInfo = { data: { userName: '小红薯', userAvatar: 'https://sns-avatar-qc.xhscdn.com/api.jpg', userId: 'u1' }, success: true };
+  expect(await page.evaluate(scripts.loginInfo)).toEqual({ name: '小红薯', avatar: 'https://sns-avatar-qc.xhscdn.com/api.jpg', user_id: 'u1' });
+  personalInfo = null;
+  expect(await page.evaluate(scripts.loginInfo)).toEqual({ name: '页面昵称', avatar: 'https://sns-avatar-qc.xhscdn.com/dom.jpg', user_id: '' });
 });

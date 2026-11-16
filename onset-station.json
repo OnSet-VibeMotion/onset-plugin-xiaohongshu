@@ -4,7 +4,7 @@
     "onset": "0.1.0"
   },
   "id": "xiaohongshu-upload",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "name": "小红书上传助手",
   "description": "选择小红书账号，在片场客户端内自动上传成片、封面并填入文案，最后由你检查并发布。",
   "after": "publish",
@@ -58,71 +58,36 @@
   "ops": [
     {
       "name": "accounts",
-      "summary": "刷新小红书账号列表",
+      "summary": "小红书账号",
       "trigger": "user",
+      "project": false,
+      "list": true,
       "command": [
         "{node}",
         "dist/plugin.cjs",
         "accounts"
       ],
-      "params": {
-        "request_id": {
-          "type": "string",
-          "description": "页面请求编号"
-        }
-      }
+      "params": {}
     },
     {
-      "name": "add_account",
-      "summary": "添加账号并打开小红书登录页",
+      "name": "login",
+      "summary": "登录小红书账号",
+      "description": "在片场里打开小红书登录页，登录好后自动记下昵称与头像，回到片场。",
       "trigger": "user",
+      "project": false,
       "command": [
         "{node}",
         "dist/plugin.cjs",
-        "add_account"
+        "login"
       ],
-      "params": {
-        "name": {
-          "type": "string",
-          "description": "账号备注名",
-          "required": true
-        },
-        "request_id": {
-          "type": "string",
-          "description": "页面请求编号"
-        }
-      }
-    },
-    {
-      "name": "rename_account",
-      "summary": "修改小红书账号备注名",
-      "trigger": "user",
-      "command": [
-        "{node}",
-        "dist/plugin.cjs",
-        "rename_account"
-      ],
-      "params": {
-        "account": {
-          "type": "string",
-          "description": "账号编号",
-          "required": true
-        },
-        "name": {
-          "type": "string",
-          "description": "新的备注名",
-          "required": true
-        },
-        "request_id": {
-          "type": "string",
-          "description": "页面请求编号"
-        }
-      }
+      "params": {}
     },
     {
       "name": "open_account",
-      "summary": "打开所选账号的小红书窗口",
+      "summary": "打开这个账号的小红书窗口",
       "trigger": "user",
+      "project": false,
+      "form": false,
       "command": [
         "{node}",
         "dist/plugin.cjs",
@@ -133,17 +98,45 @@
           "type": "string",
           "description": "账号编号",
           "required": true
-        },
-        "request_id": {
-          "type": "string",
-          "description": "页面请求编号"
         }
       }
+    },
+    {
+      "name": "remove_account",
+      "summary": "移除账号",
+      "trigger": "user",
+      "project": false,
+      "form": false,
+      "command": [
+        "{node}",
+        "dist/plugin.cjs",
+        "remove_account"
+      ],
+      "params": {
+        "account": {
+          "type": "string",
+          "description": "账号编号",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "sync_accounts",
+      "summary": "刷新插件页面里的账号列表",
+      "trigger": "user",
+      "form": false,
+      "command": [
+        "{node}",
+        "dist/plugin.cjs",
+        "sync_accounts"
+      ],
+      "params": {}
     },
     {
       "name": "prepare",
       "summary": "上传视频和封面并填写小红书文案（不提交发布）",
       "trigger": "user",
+      "form": false,
       "command": [
         "{node}",
         "dist/plugin.cjs",
@@ -154,10 +147,6 @@
           "type": "string",
           "description": "账号编号",
           "required": true
-        },
-        "request_id": {
-          "type": "string",
-          "description": "页面请求编号"
         }
       }
     }

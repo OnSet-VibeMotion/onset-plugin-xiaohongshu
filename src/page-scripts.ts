@@ -38,3 +38,31 @@ export function selectContent(): void {
   editor.focus(); const range = document.createRange(); range.selectNodeContents(editor);
   const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
 }
+/**
+ * 登录了没有、登录的是谁：还在登录页时返回 null。先问创作者中心自己的接口（字段名没有文档，按名字认），
+ * 读不到再从页面上的头像与昵称认。返回的头像是小红书 CDN 的地址，由插件进程去取。
+ */
+export async function loginInfo(): Promise<{ name: string; avatar: string; user_id: string } | null> {
+  if (/login/i.test(location.pathname)) return null;
+  const find = (value: unknown, key: RegExp, ok: (v: string) => boolean, depth = 0): string => {
+    if (!value || typeof value !== 'object' || depth > 5) return '';
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) if (typeof v === 'string' && key.test(k) && ok(v.trim())) return v.trim();
+    for (const v of Object.values(value as Record<string, unknown>)) { const found = find(v, key, ok, depth + 1); if (found) return found; }
+    return '';
+  };
+  const url = (v: string) => /^https:\/\//.test(v);
+  try {
+    const response = await fetch('/api/galaxy/creator/home/personal_info', { credentials: 'include' });
+    if (response.ok) {
+      const json = await response.json();
+      const name = find(json, /^(name|nick_?name|user_?name|nickName|userName)$/i, v => v.length > 0 && v.length <= 60);
+      if (name) return { name, avatar: find(json, /avatar|image/i, url), user_id: find(json, /^(user_?id|userId|red_?id|redId)$/i, v => v.length > 0 && v.length <= 80) };
+    }
+  } catch { /* 接口不在或改了：退回读页面 */ }
+  const visible = (e: Element) => e.getClientRects().length > 0;
+  const avatar = [...document.querySelectorAll('img')].find(i => visible(i) && /avatar/i.test(`${i.className} ${i.src} ${i.parentElement?.className ?? ''}`));
+  const nameEl = [...document.querySelectorAll('[class*="name" i], [class*="nick" i]')].find(e => visible(e) && !e.querySelector('*') && (e.textContent ?? '').trim().length > 0 && (e.textContent ?? '').trim().length <= 40);
+  const name = nameEl?.textContent?.trim() ?? '';
+  if (!name || !avatar) return null;
+  return { name, avatar: url(avatar.src) ? avatar.src : '', user_id: '' };
+}

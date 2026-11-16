@@ -3,8 +3,8 @@ import { writeProjectJSON } from './files';
 
 let request: Request | undefined;
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.once(signal, () => {
-  if (request) {
-    const result = { status: 'interrupted', message: '操作已取消，小红书窗口仍保留，请自行检查', request_id: request.params.request_id ?? '' };
+  if (request?.project_root) {
+    const result = { status: 'interrupted', message: '操作已取消，小红书窗口仍保留，请自行检查', updated_at: new Date().toISOString() };
     try {
       writeProjectJSON(request.project_root, 'production/xiaohongshu/latest.json', result);
       if (process.argv[2] === 'prepare') writeProjectJSON(request.project_root, 'production/xiaohongshu/state.json', result);
@@ -24,6 +24,8 @@ async function main(): Promise<void> {
   const result = await runOperation(process.argv[2] ?? '', request, (fraction, message) => {
     process.stdout.write(`onset-progress ${fraction.toFixed(2)} ${message.replace(/[\r\n]/g, ' ')}\n`);
   });
+  // 说明照实给片场：设置里点的账号操作没有插件页面，结果就看这一行。
+  process.stdout.write(`${result.message.replace(/[\r\n]/g, ' ')}\n`);
   process.stdout.write(`onset-result ${JSON.stringify(result)}\n`);
 }
 main().catch(err => { process.stderr.write(`${err instanceof Error ? err.message : '操作失败'}\n`); process.exitCode = 1; });

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { stringify } from 'yaml';
-import { AccountStore, withAccountLock } from '../src/accounts';
+import { AccountStore, newAccountID, withAccountLock } from '../src/accounts';
 import { readDraft } from '../src/draft';
 import { projectFile, writeProjectJSON } from '../src/files';
 
@@ -24,26 +24,46 @@ function project(over: Record<string, unknown> = {}) {
 }
 
 describe('账号资料', () => {
-  it('账号共用插件数据目录，但每个账号拥有独立浏览器目录，重命名不丢登录状态', () => {
+  const add = (store: AccountStore, name: string, user_id?: string, avatar?: string) => store.saveLoggedIn({ id: newAccountID(), name, user_id, avatar }).account;
+  it('登录后记下昵称与头像；每个账号独立的浏览器目录', () => {
     const data = temp(); const store = new AccountStore(data);
-    const a = store.add('个人号'), b = store.add('工作号');
+    const avatar = 'data:image/png;base64,iVBORw0KGgo=';
+    const a = add(store, '个人号', 'u1', avatar), b = add(store, '工作号', 'u2');
     expect(a.id).not.toBe(b.id);
     expect(store.profile(a.id)).not.toBe(store.profile(b.id));
-    fs.writeFileSync(path.join(store.profile(a.id), 'sentinel'), 'session-a');
-    store.rename(a.id, '生活号');
-    expect(new AccountStore(data).list().map(a => a.name).sort()).toEqual(['工作号', '生活号']);
-    expect(fs.readFileSync(path.join(store.profile(a.id), 'sentinel'), 'utf8')).toBe('session-a');
+    expect(new AccountStore(data).list().map(x => [x.name, x.avatar ?? ''])).toEqual([['个人号', avatar], ['工作号', '']]);
     expect(fs.statSync(store.profile(a.id)).mode & 0o777).toBe(0o700);
   });
-  it('拒绝空名、重复名字、非法编号和缺失账号', () => {
-    const s = new AccountStore(temp()); s.add('个人号');
-    for (const name of ['', ' ', '坏\n名字', '字'.repeat(41), '个人号']) expect(() => s.add(name)).toThrow();
+  it('同一个小红书账号重新登录：换成新的一条，删掉旧的登录状态，保留加入时间', () => {
+    const data = temp(); const store = new AccountStore(data);
+    const old = add(store, '旧昵称', 'same');
+    const session = path.join(data, 'web-sessions', old.id);
+    fs.mkdirSync(session, { recursive: true });
+    const { account, replaced } = store.saveLoggedIn({ id: newAccountID(), name: '新昵称', user_id: 'same' });
+    expect(replaced?.id).toBe(old.id);
+    expect(account.created_at).toBe(old.created_at);
+    expect(store.list().map(a => a.name)).toEqual(['新昵称']);
+    expect(fs.existsSync(session)).toBe(false);
+  });
+  it('移除账号时一并删掉登录状态；昵称过长截断、控制字符换成空格；不认外来的头像格式', () => {
+    const data = temp(); const store = new AccountStore(data);
+    const a = add(store, '字'.repeat(50) + '\n尾', undefined, 'https://example.com/a.png');
+    expect([...a.name].length).toBe(40);
+    expect(a.avatar).toBeUndefined();
+    fs.mkdirSync(path.join(data, 'web-sessions', a.id), { recursive: true });
+    expect(store.remove(a.id).id).toBe(a.id);
+    expect(store.list()).toEqual([]);
+    expect(fs.existsSync(path.join(data, 'web-sessions', a.id))).toBe(false);
+    expect(() => store.saveLoggedIn({ id: newAccountID(), name: '  ' })).toThrow('昵称');
+  });
+  it('拒绝非法编号和缺失账号', () => {
+    const s = new AccountStore(temp());
     expect(() => s.get('../outside')).toThrow();
     expect(() => s.get('00000000-0000-4000-8000-000000000000')).toThrow();
-    const b = s.add('工作号'); expect(() => s.rename(b.id, '个人号')).toThrow();
+    expect(() => s.saveLoggedIn({ id: '../x', name: '坏' })).toThrow();
   });
   it('一个账号准备期间禁止并发；异常后能再次使用', async () => {
-    const s = new AccountStore(temp()); const a = s.add('个人号');
+    const s = new AccountStore(temp()); const a = add(s, '个人号');
     await withAccountLock(s.profile(a.id), async () => {
       await expect(withAccountLock(s.profile(a.id), async () => {})).rejects.toThrow('正在');
     });
@@ -51,7 +71,7 @@ describe('账号资料', () => {
     await expect(withAccountLock(s.profile(a.id), async () => 42)).resolves.toBe(42);
   });
   it('进程退出留下的账号锁可恢复，损坏的锁不会被静默接管', async () => {
-    const store = new AccountStore(temp()); const account = store.add('恢复测试');
+    const store = new AccountStore(temp()); const account = add(store, '恢复测试');
     const lock = path.join(store.profile(account.id), 'operation.lock');
     fs.writeFileSync(lock, '999999999');
     await expect(withAccountLock(store.profile(account.id), async () => 'recovered')).resolves.toBe('recovered');
