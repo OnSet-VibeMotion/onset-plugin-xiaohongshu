@@ -39,12 +39,11 @@ it('账号列表给设置画卡片：头像、昵称、打开与移除；不打�
   ] }]);
   expect(fs.readdirSync(request.project_root)).toEqual([]);
 });
-it('项目里刷新账号快照给插件页面：只有名字与头像，不含登录状态', async () => {
-  const { request, deps } = setup();
-  await runOperation('sync_accounts', request, () => {}, deps);
-  const snapshot = JSON.parse(fs.readFileSync(path.join(request.project_root, 'production/xiaohongshu/accounts.json'), 'utf8'));
-  expect(snapshot.accounts).toHaveLength(1);
-  expect(Object.keys(snapshot.accounts[0])).toEqual(['id', 'name', 'created_at']);
+it('账号列表也给插件页面（onset.list）：编号、名字与头像，不含登录状态，不写项目', async () => {
+  const { request, deps, account } = setup();
+  const listed = await runOperation('accounts', request, () => {}, deps) as { accounts?: Record<string, unknown>[] };
+  expect(listed.accounts).toEqual([{ id: account.id, name: '工作号', created_at: account.created_at }]);
+  expect(fs.readdirSync(request.project_root)).toEqual([]);
 });
 it('一键登录：打开登录页，等用户登录好，读出昵称与头像记下来，关掉页面回到片场', async () => {
   const { request, deps, evaluate, close, navigate } = setup();
@@ -110,14 +109,13 @@ it('先校验素材，再开浏览器，错误时不会上传', async () => {
   await expect(runOperation('prepare', request, () => {}, deps)).rejects.toThrow('成片已变动');
   expect(deps.open).not.toHaveBeenCalled();
 });
-it('没打开项目时账号操作不写任何项目；上传与项目快照仍要项目', async () => {
+it('没打开项目时账号操作不写任何项目；上传仍要项目', async () => {
   const { request, deps, account } = setup();
   const project = request.project_root;
   request.project_root = '';
   request.params = { account: account.id };
   await runOperation('open_account', request, () => {}, deps);
   await expect(runOperation('prepare', request, () => {}, deps)).rejects.toThrow('要在项目里进行');
-  await expect(runOperation('sync_accounts', { ...request, params: {} }, () => {}, deps)).rejects.toThrow('要在项目里进行');
   expect(fs.readdirSync(project)).toEqual([]);
   expect(deps.draft).not.toHaveBeenCalled();
 });

@@ -7846,7 +7846,7 @@ async function preparePage(page, draft, progress, options = {}) {
 }
 
 // src/app.ts
-var operations = ["accounts", "login", "open_account", "remove_account", "sync_accounts", "prepare"];
+var operations = ["accounts", "login", "open_account", "remove_account", "prepare"];
 async function fetchAvatar(raw) {
   const url = new URL(raw);
   if (url.protocol !== "https:" || !/(^|\.)(xhscdn\.com|xiaohongshu\.com)$/.test(url.hostname)) return "";
@@ -7887,8 +7887,8 @@ function accountItems(accounts) {
     ]
   }));
 }
-function snapshotAccounts(accounts) {
-  return { accounts: accounts.map((a) => ({ id: a.id, name: a.name, created_at: a.created_at, ...a.avatar ? { avatar: a.avatar } : {} })) };
+function pageAccounts(accounts) {
+  return accounts.map((a) => ({ id: a.id, name: a.name, created_at: a.created_at, ...a.avatar ? { avatar: a.avatar } : {} }));
 }
 async function runOperation(operation, raw, progress = () => {
 }, deps = defaults) {
@@ -7897,10 +7897,7 @@ async function runOperation(operation, raw, progress = () => {
   const { project_root: root, params } = request2;
   const store = new AccountStore(request2.data_dir);
   let account;
-  if (!root && (operation === "prepare" || operation === "sync_accounts")) throw Error("\u8981\u5728\u9879\u76EE\u91CC\u8FDB\u884C\uFF1A\u5148\u5728\u7247\u573A\u6253\u5F00\u8FD9\u4E2A\u9879\u76EE");
-  const snapshot = () => {
-    if (root) writeProjectJSON(root, "production/xiaohongshu/accounts.json", snapshotAccounts(store.list()));
-  };
+  if (!root && operation === "prepare") throw Error("\u8981\u5728\u9879\u76EE\u91CC\u8FDB\u884C\uFF1A\u5148\u5728\u7247\u573A\u6253\u5F00\u8FD9\u4E2A\u9879\u76EE");
   const update = (result) => {
     if (!root || operation === "accounts") return;
     writeProjectJSON(root, "production/xiaohongshu/latest.json", { status: result.status, message: result.message, ...result.account ? { account: { id: result.account.id, name: result.account.name } } : {}, ...result.warnings ? { warnings: result.warnings } : {}, operation, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
@@ -7909,18 +7906,11 @@ async function runOperation(operation, raw, progress = () => {
   try {
     if (operation === "accounts") {
       const accounts = store.list();
-      return { status: "accounts_loaded", message: accounts.length ? `${accounts.length} \u4E2A\u8D26\u53F7` : "\u8FD8\u6CA1\u6709\u8D26\u53F7", items: accountItems(accounts) };
+      return { status: "accounts_loaded", message: accounts.length ? `${accounts.length} \u4E2A\u8D26\u53F7` : "\u8FD8\u6CA1\u6709\u8D26\u53F7", items: accountItems(accounts), accounts: pageAccounts(accounts) };
     }
     update({ status: "running", message: operation === "login" ? "\u6B63\u5728\u6253\u5F00\u5C0F\u7EA2\u4E66\u767B\u5F55\u9875\u2026" : "\u6B63\u5728\u51C6\u5907\u2026" });
-    if (operation === "sync_accounts") {
-      snapshot();
-      const result2 = { status: "accounts_loaded", message: store.list().length ? "\u8D26\u53F7\u5217\u8868\u5DF2\u5237\u65B0" : "\u8FD8\u6CA1\u6709\u8D26\u53F7\uFF0C\u5148\u767B\u5F55\u4E00\u4E2A" };
-      update(result2);
-      return result2;
-    }
     if (operation === "login") {
       const result2 = await login(request2, store, progress, deps);
-      snapshot();
       update(result2);
       return result2;
     }
@@ -7935,12 +7925,10 @@ async function runOperation(operation, raw, progress = () => {
         }
       }
       store.remove(account.id);
-      snapshot();
       const result2 = { status: "removed", message: `\u5DF2\u79FB\u9664\u300C${account.name}\u300D` };
       update(result2);
       return result2;
     }
-    snapshot();
     const result = await withAccountLock(store.profile(account.id), async () => {
       const draft = operation === "prepare" ? await deps.draft(root) : null;
       progress(0.05, `\u6B63\u5728\u6253\u5F00\u300C${account.name}\u300D\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3`);

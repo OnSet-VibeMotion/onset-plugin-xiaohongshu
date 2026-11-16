@@ -32,7 +32,8 @@ beforeAll(async () => {
       res.setHeader('Content-Type', 'text/javascript'); res.end(`
         document.documentElement.style.cssText='--text:#eee8dd;--bg:#17191b;--panel:#25272a;--well:#202224;--line:#3b3d40;--accent:#ccb486;--accent-ink:#17191b;--text-2:#b3b0a9;--text-3:#96928b;--bad:#e98c80';
         window.calls=[]; window.latest=null;
-        window.onset={ready:Promise.resolve(),onRefresh:()=>{},read:async p=>({text:JSON.stringify(p.includes('accounts')?{accounts:[{id:'a',name:'个人号'},{id:'b',name:'工作号'}]}:window.latest)}),
+        window.onset={ready:Promise.resolve(),onRefresh:()=>{},read:async p=>{if(p.includes('accounts'))throw Error('账号不在项目文件里');return {text:JSON.stringify(window.latest)};},
+        list:async op=>op==='accounts'?{accounts:[{id:'a',name:'个人号'},{id:'b',name:'工作号'}]}:{},
         run:async(op,params)=>{calls.push({op,params});window.latest={status:'ready_to_publish',updated_at:new Date(Date.now()+1000).toISOString(),message:'内容已填好，请在小红书页面手动发布',account:{id:params.account},warnings:[]};return {started:true};}};
       `); return;
     }

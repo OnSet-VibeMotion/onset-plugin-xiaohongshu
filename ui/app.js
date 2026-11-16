@@ -1,6 +1,22 @@
 const $ = id => document.getElementById(id);
 // 正在跑的操作与它开始的时间：latest.json 更新到这之后才算有了结果。
 let running = '', since = '', accounts = [], timer, deadline = 0;
+// 上一次读完账号列表的时间：读列表本身是一次任务，跑完宿主会发 refresh，紧跟着的那一下不再读，免得没完没了。
+let listedAt = 0;
+/** 账号在插件自己的数据目录里（设置里没打开项目也能登录），经 onset.list 现读，不靠项目里的文件。 */
+async function loadAccounts() {
+  const selected = $('accounts').value;
+  let listed = null;
+  try { listed = await onset.list('accounts'); } catch (err) { if (!running) status(err.message, true); }
+  listedAt = Date.now();
+  if (!Array.isArray(listed?.accounts)) return;
+  accounts = listed.accounts;
+  $('accounts').replaceChildren();
+  for (const account of accounts) $('accounts').add(new Option(account.name, account.id));
+  if (!accounts.length) $('accounts').add(new Option('还没有账号，先登录一个', ''));
+  if (accounts.some(account => account.id === selected)) $('accounts').value = selected;
+  buttons();
+}
 function status(message, error = false) { $('status').textContent = message; $('status').dataset.error = String(error); }
 function buttons() {
   for (const id of ['prepare', 'open']) $(id).disabled = !!running || !$('accounts').value;
@@ -19,15 +35,6 @@ async function refresh() {
     status('任务长时间没有完成，请查看片场任务列表和小红书窗口。重新上传前先检查已有内容。', true);
     return;
   }
-  const snapshot = await read('accounts');
-  const selected = $('accounts').value;
-  if (snapshot?.accounts) {
-    accounts = snapshot.accounts;
-    $('accounts').replaceChildren();
-    for (const account of accounts) $('accounts').add(new Option(account.name, account.id));
-    if (!accounts.length) $('accounts').add(new Option('还没有账号，先登录一个', ''));
-    if (accounts.some(account => account.id === selected)) $('accounts').value = selected;
-  }
   const latest = await read('latest');
   if (latest && (!running || (latest.updated_at ?? '') >= since)) {
     status(latest.message, ['error', 'interrupted'].includes(latest.status));
@@ -35,6 +42,7 @@ async function refresh() {
     for (const warning of latest.warnings ?? []) { const item = document.createElement('li'); item.textContent = warning; $('warnings').append(item); }
     if (running && latest.status !== 'running') {
       running = ''; clearInterval(timer);
+      await loadAccounts();
       if (latest.account && accounts.some(a => a.id === latest.account.id)) $('accounts').value = latest.account.id;
     }
   } else if (!running) status(accounts.length ? '选择账号后，打开小红书或上传并填写。' : '先点「登录新账号」，在弹出的小红书页面登录。');
@@ -52,9 +60,10 @@ async function run(operation, params = {}) {
   } catch (err) { running = ''; status(err.message, true); buttons(); }
 }
 $('accounts').addEventListener('change', buttons);
-$('refresh').onclick = () => run('sync_accounts');
+$('refresh').onclick = () => { if (!running) void loadAccounts().then(refresh); };
 $('login').onclick = () => run('login');
 $('open').onclick = () => run('open_account', { account: $('accounts').value });
 $('prepare').onclick = () => run('prepare', { account: $('accounts').value });
-onset.onRefresh(refresh);
-onset.ready.then(refresh).catch(err => status(err.message, true));
+// 项目或任务有变化（例如在设置里登录了新账号）：重读；自己读列表引起的那一下跳过。
+onset.onRefresh(() => { if (!running && Date.now() - listedAt > 3000) void loadAccounts().then(refresh); else void refresh(); });
+onset.ready.then(loadAccounts).then(refresh).catch(err => status(err.message, true));

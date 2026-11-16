@@ -4,7 +4,7 @@
     "onset": "0.1.0"
   },
   "id": "xiaohongshu-upload",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "name": "小红书上传助手",
   "description": "选择小红书账号，在片场客户端内自动上传成片、封面并填入文案，最后由你检查并发布。",
   "after": "publish",
@@ -119,18 +119,6 @@
           "required": true
         }
       }
-    },
-    {
-      "name": "sync_accounts",
-      "summary": "刷新插件页面里的账号列表",
-      "trigger": "user",
-      "form": false,
-      "command": [
-        "{node}",
-        "dist/plugin.cjs",
-        "sync_accounts"
-      ],
-      "params": {}
     },
     {
       "name": "prepare",

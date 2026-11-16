@@ -12,8 +12,8 @@ export interface Request {
   project_root: string; data_dir: string; browser?: BrowserBridge;
   params: Record<string, unknown>; settings: Record<string, unknown>;
 }
-export interface Result { status: string; message: string; account?: Account; warnings?: string[]; video_sha256?: string; items?: unknown[] }
-const operations = ['accounts', 'login', 'open_account', 'remove_account', 'sync_accounts', 'prepare'];
+export interface Result { status: string; message: string; account?: Account; warnings?: string[]; video_sha256?: string; items?: unknown[]; accounts?: unknown[] }
+const operations = ['accounts', 'login', 'open_account', 'remove_account', 'prepare'];
 /** 小红书 CDN 上的头像：插件进程取回来存成 data URL，片场与插件页面都只认这种图片。 */
 async function fetchAvatar(raw: string): Promise<string> {
   const url = new URL(raw);
@@ -57,9 +57,9 @@ function accountItems(accounts: Account[]): unknown[] {
     ],
   }));
 }
-/** 写进项目给插件页面看的账号快照：不含登录状态，只有名字与头像。 */
-function snapshotAccounts(accounts: Account[]) {
-  return { accounts: accounts.map(a => ({ id: a.id, name: a.name, created_at: a.created_at, ...(a.avatar ? { avatar: a.avatar } : {}) })) };
+/** 给插件页面（onset.list）的账号：编号、名字与头像，不含登录状态。账号只在插件自己的数据目录里，不写进项目。 */
+function pageAccounts(accounts: Account[]) {
+  return accounts.map(a => ({ id: a.id, name: a.name, created_at: a.created_at, ...(a.avatar ? { avatar: a.avatar } : {}) }));
 }
 
 export async function runOperation(operation: string, raw: unknown, progress: Progress = () => {}, deps = defaults): Promise<Result> {
@@ -68,9 +68,7 @@ export async function runOperation(operation: string, raw: unknown, progress: Pr
   const { project_root: root, params } = request;
   const store = new AccountStore(request.data_dir);
   let account: Account | undefined;
-  if (!root && (operation === 'prepare' || operation === 'sync_accounts')) throw Error('要在项目里进行：先在片场打开这个项目');
-  // 没打开项目时（project_root 为空）账号只记在插件自己的数据目录，不写项目快照。
-  const snapshot = () => { if (root) writeProjectJSON(root, 'production/xiaohongshu/accounts.json', snapshotAccounts(store.list())); };
+  if (!root && operation === 'prepare') throw Error('要在项目里进行：先在片场打开这个项目');
   const update = (result: Result) => {
     if (!root || operation === 'accounts') return;
     writeProjectJSON(root, 'production/xiaohongshu/latest.json', { status: result.status, message: result.message, ...(result.account ? { account: { id: result.account.id, name: result.account.name } } : {}), ...(result.warnings ? { warnings: result.warnings } : {}), operation, updated_at: new Date().toISOString() });
@@ -79,22 +77,16 @@ export async function runOperation(operation: string, raw: unknown, progress: Pr
   try {
     if (operation === 'accounts') {
       const accounts = store.list();
-      return { status: 'accounts_loaded', message: accounts.length ? `${accounts.length} 个账号` : '还没有账号', items: accountItems(accounts) };
+      return { status: 'accounts_loaded', message: accounts.length ? `${accounts.length} 个账号` : '还没有账号', items: accountItems(accounts), accounts: pageAccounts(accounts) };
     }
     update({ status: 'running', message: operation === 'login' ? '正在打开小红书登录页…' : '正在准备…' });
-    if (operation === 'sync_accounts') {
-      snapshot();
-      const result = { status: 'accounts_loaded', message: store.list().length ? '账号列表已刷新' : '还没有账号，先登录一个' };
-      update(result); return result;
-    }
-    if (operation === 'login') { const result = await login(request, store, progress, deps); snapshot(); update(result); return result; }
+    if (operation === 'login') { const result = await login(request, store, progress, deps); update(result); return result; }
     account = store.get(parameter(params.account, '账号'));
     if (operation === 'remove_account') {
       if (request.browser) { const bridge = deps.bridge(request.browser); try { await bridge.forget(account.id); } finally { bridge.disconnect(); } }
-      store.remove(account.id); snapshot();
+      store.remove(account.id);
       const result = { status: 'removed', message: `已移除「${account.name}」` }; update(result); return result;
     }
-    snapshot();
     const result = await withAccountLock(store.profile(account.id), async (): Promise<Result> => {
       const draft = operation === 'prepare' ? await deps.draft(root) : null;
       progress(0.05, `正在打开「${account!.name}」的小红书窗口`);
