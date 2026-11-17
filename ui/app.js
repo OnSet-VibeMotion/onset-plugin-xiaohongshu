@@ -50,7 +50,7 @@ async function refresh() {
 }
 async function run(operation, params = {}) {
   if (running) return;
-  running = operation; since = new Date().toISOString(); deadline = Infinity; buttons(); status('请在片场上方确认这次操作');
+  running = operation; since = new Date().toISOString(); deadline = Infinity; buttons(); status('正在开始…（如果片场上方弹出确认，请点「执行」）');
   try {
     await onset.run(operation, params);
     deadline = Date.now() + 20 * 60 * 1000;
