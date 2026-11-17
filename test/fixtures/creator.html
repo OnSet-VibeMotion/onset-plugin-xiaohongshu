@@ -20,20 +20,46 @@ document.querySelector('#publish').onclick=()=>submits++;
 window.knownTopics=['科技','科技感','AI'];
 const editor=document.querySelector('[contenteditable]');
 const box=document.createElement('div');box.id='creator-editor-topic-container';box.hidden=true;document.body.append(box);
-function lastText(){const w=document.createTreeWalker(editor,NodeFilter.SHOW_TEXT);let n=null,t;while((t=w.nextNode()))n=t;return n;}
-editor.addEventListener('input',()=>{
-  const node=lastText(); const m=node&&/#([^\s#]+)$/.exec(node.data);
-  const hits=m?knownTopics.filter(t=>t.toLowerCase().startsWith(m[1].toLowerCase())):[];
+function lastText(){const sel=getSelection();const at=sel.rangeCount?sel.getRangeAt(0).startContainer:null;if(at&&at.nodeType===3&&editor.contains(at))return at;const w=document.createTreeWalker(editor,NodeFilter.SHOW_TEXT);let n=null,t;while((t=w.nextNode()))n=t;return n;}
+// window.hotTopic：候选输完字 120ms 后重画一次，把这个热门话题插到最前面（同名项被挤到下一行）。
+// window.misfire：头几次点同名项时插进来的是它（仿点下去的瞬间列表换了）。
+function renderTopics(hits){
   box.innerHTML=hits.map(t=>'<div class="item"><span class="name">#'+t+'</span><span class="num">10亿次浏览</span></div>').join('');
   box.hidden=!hits.length;
   box.querySelectorAll('.item').forEach((item,i)=>item.addEventListener('click',e=>{
     if(!e.isTrusted)return;
     const text=lastText(); const at=text.data.lastIndexOf('#'); text.data=text.data.slice(0,at);
-    const a=document.createElement('a'); a.setAttribute('data-topic',JSON.stringify({name:hits[i]})); a.textContent='#'+hits[i]+'[话题]#';
-    const after=document.createTextNode(' '); text.after(a,after); box.hidden=true;
+    let name=hits[i]; if(window.misfire&&name!==window.hotTopic){window.misfire--;name=window.hotTopic||'别的话题';}
+    const a=document.createElement('a'); a.setAttribute('data-topic',JSON.stringify({name})); a.textContent='#'+name+'[话题]#';
+    const after=document.createTextNode('\u00a0'); text.after(a,after); box.hidden=true;
     editor.focus(); const r=document.createRange(); r.setStart(after,1); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r);
   }));
+}
+let rerender=0;
+editor.addEventListener('input',()=>{
+  const node=lastText(); const m=node&&/#([^\s#]+)$/.exec(node.data);
+  const hits=m?knownTopics.filter(t=>t.toLowerCase().startsWith(m[1].toLowerCase())):[];
+  renderTopics(hits); clearTimeout(rerender);
+  if(hits.length&&window.hotTopic) rerender=setTimeout(()=>renderTopics([window.hotTopic,...hits]),120);
 });
+// 退格：光标前面是话题（中间最多隔一个空格）时整个删掉，像编辑器里不可编辑的话题节点。
+// 退格：光标前面（中间最多隔一个空格）是话题时整个删掉，像编辑器里不可编辑的话题节点。
+editor.addEventListener('keydown',e=>{
+  if(e.key!=='Backspace')return;
+  const sel=getSelection(); if(!sel.rangeCount)return; const r=sel.getRangeAt(0);
+  let node=r.startContainer, before=null, space=null;
+  if(node.nodeType===3){ if(/^[\s\u00a0]?$/.test(node.data.slice(0,r.startOffset))){space=node;before=node.previousSibling;} }
+  else before=node.childNodes[r.startOffset-1];
+  if(!before||before.nodeName!=='A')return;
+  e.preventDefault(); const parent=before.parentNode; before.remove();
+  const keep=space||parent.appendChild(document.createTextNode('\u00a0'));
+  const nr=document.createRange(); nr.setStart(keep,space?Math.min(r.startOffset,keep.data.length):keep.data.length); nr.collapse(true); sel.removeAllRanges(); sel.addRange(nr);
+});
+// window.autoTopic：插进第一个话题后，页面自己在正文末尾追加一个不在清单里的话题（仿「关联活动」）。
+new MutationObserver(()=>{ if(!window.autoTopic||editor.querySelector('a[data-auto]')||!editor.querySelector('a[data-topic]'))return;
+  const a=document.createElement('a'); a.setAttribute('data-topic',JSON.stringify({name:window.autoTopic})); a.setAttribute('data-auto',''); a.textContent='#'+window.autoTopic+'[话题]#';
+  const host=editor.lastElementChild&&editor.lastElementChild.nodeName==='DIV'?editor.lastElementChild:editor; host.append(a,document.createTextNode('\u00a0')); window.autoTopic='';
+}).observe(editor,{childList:true,subtree:true});
 
 // 仿小红书的草稿箱：草稿在本机 IndexedDB（draft-database-v1 / video-draft），抽屉里按标题与保存时间列出，
 // 点「编辑」直接回到视频已上传、可以填写的状态。

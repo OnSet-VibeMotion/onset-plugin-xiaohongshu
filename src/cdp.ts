@@ -116,8 +116,8 @@ export class Page {
     }
   }
   /** 按一个键；客户端不让发键盘事件时返回 false。 */
-  async press(key: 'Enter' | 'Escape'): Promise<boolean> {
-    const code = key === 'Enter' ? 13 : 27;
+  async press(key: 'Enter' | 'Escape' | 'Backspace'): Promise<boolean> {
+    const code = key === 'Enter' ? 13 : key === 'Escape' ? 27 : 8;
     if (!await this.trusted('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code, ...(key === 'Enter' ? { text: '\r' } : {}) })) return false;
     await this.raw('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code });
     return true;

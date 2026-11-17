@@ -7578,8 +7578,17 @@ function topicTarget(tag) {
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 function insertedTopics() {
-  const nodes = [...document.querySelectorAll("a[data-topic]")];
+  const editor = [...document.querySelectorAll('.tiptap.ProseMirror[contenteditable="true"], .ProseMirror[contenteditable="true"], [contenteditable="true"][role="textbox"], [contenteditable="true"]')].find((e) => e.getClientRects().length);
+  const nodes = editor ? [...editor.querySelectorAll("a[data-topic]")] : [];
   const node = nodes[nodes.length - 1];
+  const nameOf = (a) => {
+    try {
+      const n = String(JSON.parse(a.getAttribute("data-topic") ?? "{}").name ?? "");
+      if (n) return n.replace(/^#/, "").trim();
+    } catch {
+    }
+    return (a.textContent ?? "").trim().replace(/^#/, "").replace(/\[话题\]#?$/, "");
+  };
   let last = "";
   if (node) {
     try {
@@ -7589,7 +7598,7 @@ function insertedTopics() {
     }
     if (!last) last = (node.textContent ?? "").trim().replace(/^#/, "").replace(/\[话题\]#?$/, "");
   }
-  return { count: nodes.length, last: last.replace(/^#/, "").trim() };
+  return { count: nodes.length, last: last.replace(/^#/, "").trim(), names: nodes.map(nameOf) };
 }
 async function findVideoDraft(size) {
   try {
@@ -7650,6 +7659,29 @@ function pointerClick({ x, y }) {
   target.dispatchEvent(new MouseEvent("mouseup", init));
   target.dispatchEvent(new MouseEvent("click", init));
   return true;
+}
+function selectExtraTopic(keep) {
+  const editor = [...document.querySelectorAll('.tiptap.ProseMirror[contenteditable="true"], .ProseMirror[contenteditable="true"], [contenteditable="true"][role="textbox"], [contenteditable="true"]')].find((e) => e.getClientRects().length);
+  if (!editor) return "";
+  const wanted = new Set(keep.map((k) => k.replace(/^#/, "").trim().toLowerCase()));
+  const nameOf = (a) => {
+    try {
+      const n = String(JSON.parse(a.getAttribute("data-topic") ?? "{}").name ?? "");
+      if (n) return n;
+    } catch {
+    }
+    return (a.textContent ?? "").trim().replace(/^#/, "").replace(/\[话题\]#?$/, "");
+  };
+  const extra = [...editor.querySelectorAll("a[data-topic]")].find((a) => !wanted.has(nameOf(a).trim().toLowerCase()));
+  if (!extra) return "";
+  editor.focus();
+  const range = document.createRange();
+  range.setStartAfter(extra);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return nameOf(extra);
 }
 function fillTitle(value) {
   const input = [...document.querySelectorAll('input[placeholder*="\u6807\u9898"], div.d-input input')].find((e) => e.getClientRects().length);
@@ -7787,7 +7819,7 @@ var Page = class _Page {
   }
   /** 按一个键；客户端不让发键盘事件时返回 false。 */
   async press(key) {
-    const code = key === "Enter" ? 13 : 27;
+    const code = key === "Enter" ? 13 : key === "Escape" ? 27 : 8;
     if (!await this.trusted("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: code, ...key === "Enter" ? { text: "\r" } : {} })) return false;
     await this.raw("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: code });
     return true;
@@ -7974,34 +8006,49 @@ async function preparePage(page, draft, progress, options = {}) {
     if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', "\u786E\u5B9A")) throw Error("\u5C01\u9762\u6CA1\u6709\u786E\u8BA4\u6210\u529F");
     await page.waitFor(coverDialogClosed, Math.min(timeout, 15e3), "\u5C01\u9762\u5C1A\u672A\u4FDD\u5B58\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
   }
+  warnings.push(...await removeExtraTopics(page, draft.tags));
   await page.waitFor(publishReady, Math.min(timeout, 18e4), "\u5185\u5BB9\u5DF2\u586B\u5199\uFF0C\u4F46\u5C0F\u7EA2\u4E66\u5C1A\u672A\u5141\u8BB8\u53D1\u5E03\uFF0C\u8BF7\u5728\u7A97\u53E3\u68C0\u67E5\u4E0A\u4F20\u8FDB\u5EA6\u6216\u6821\u9A8C\u63D0\u793A");
   progress(1, "\u5185\u5BB9\u5DF2\u586B\u597D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5\u5E76\u624B\u52A8\u53D1\u5E03");
   return warnings;
 }
 async function insertTopic(page, tag, timeout) {
-  const before = (await page.evaluate(insertedTopics)).count;
+  const same = (names) => names.filter((n) => n.toLowerCase() === tag.toLowerCase()).length;
+  let start = await page.evaluate(insertedTopics);
   await page.type("#");
   await delay(Math.min(timeout, 200));
   await page.type(tag);
   const deadline = Date.now() + Math.min(timeout, 5e3);
+  let wrong = "";
+  let last = null;
   for (let attempts = 0; attempts < 3 && Date.now() < deadline; ) {
     const at = await page.evaluate(topicTarget, tag);
-    if (!at) {
-      await delay(Math.min(timeout, 200));
+    const settled = at && last && Math.abs(at.x - last.x) < 1 && Math.abs(at.y - last.y) < 1;
+    last = at;
+    if (!at || !settled) {
+      await delay(Math.min(timeout, 150));
       continue;
     }
     attempts++;
     await page.clickAt(at.x, at.y);
     const settle = Date.now() + Math.min(timeout, 1e3);
-    do {
-      const now = await page.evaluate(insertedTopics);
-      if (now.count > before) return now.last.toLowerCase() === tag.toLowerCase() ? "picked" : { other: now.last };
+    let now = await page.evaluate(insertedTopics);
+    while (now.count === start.count && Date.now() < settle) {
       await delay(50);
-    } while (Date.now() < settle);
+      now = await page.evaluate(insertedTopics);
+    }
+    if (now.count === start.count) continue;
+    if (same(now.names) > same(start.names)) return "picked";
+    wrong = now.last;
+    if (!await page.press("Backspace")) return { other: wrong };
+    await delay(100);
+    if ((await page.evaluate(insertedTopics)).count >= now.count) return { other: wrong };
+    start = await page.evaluate(insertedTopics);
+    await page.type("#" + tag);
+    last = null;
   }
   await page.press("Escape");
   await page.type(" ", 0);
-  return "missing";
+  return wrong ? { other: wrong } : "missing";
 }
 async function resumeDraft(page, draft, progress, timeout) {
   const found = await page.evaluate(findVideoDraft, import_node_fs4.default.statSync(draft.video).size);
@@ -8016,6 +8063,19 @@ async function resumeDraft(page, draft, progress, timeout) {
   if (await page.evaluate(editDraft, found)) return true;
   await page.press("Escape");
   return false;
+}
+async function removeExtraTopics(page, tags) {
+  const removed = [];
+  for (let round = 0; round < 20; round++) {
+    const name = await page.evaluate(selectExtraTopic, tags);
+    if (!name) break;
+    const before = (await page.evaluate(insertedTopics)).count;
+    if (!await page.press("Backspace")) return [`\u6B63\u6587\u91CC\u591A\u4E86\u4E0D\u5728\u8BDD\u9898\u6E05\u5355\u91CC\u7684\u8BDD\u9898\u300C${name}\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u5220\u6389\u3002`];
+    await delay(100);
+    if ((await page.evaluate(insertedTopics)).count >= before) return [`\u6B63\u6587\u91CC\u591A\u51FA\u7684\u8BDD\u9898\u300C${name}\u300D\u6CA1\u5220\u6389\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u5220\u6389\u3002`];
+    removed.push(name);
+  }
+  return removed.length ? [`\u5DF2\u5220\u6389\u6B63\u6587\u91CC\u4E0D\u5728\u8BDD\u9898\u6E05\u5355\u91CC\u7684\u8BDD\u9898\uFF1A${removed.join("\u3001")}\u3002`] : [];
 }
 
 // src/app.ts

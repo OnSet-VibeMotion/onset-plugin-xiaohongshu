@@ -42,6 +42,7 @@ export async function preparePage(page: Page, draft: Draft, progress: Progress, 
     if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', '确定')) throw Error('封面没有确认成功');
     await page.waitFor(scripts.coverDialogClosed, Math.min(timeout, 15_000), '封面尚未保存，请在小红书窗口检查');
   }
+  warnings.push(...await removeExtraTopics(page, draft.tags));
   // Readiness only: do not click. Upload progress can coexist with an editable form.
   await page.waitFor(scripts.publishReady, Math.min(timeout, 180_000), '内容已填写，但小红书尚未允许发布，请在窗口检查上传进度或校验提示');
   progress(1, '内容已填好，请在小红书页面检查并手动发布');
@@ -53,26 +54,40 @@ export async function preparePage(page: Page, draft: Draft, progress: Progress, 
  * 候选会随输入重画，所以每次都重新找；最多点 3 次、等 5 秒。找不到同名话题时留下文字、补一个空格收尾。
  */
 async function insertTopic(page: Page, tag: string, timeout: number): Promise<'picked' | 'missing' | { other: string }> {
-  const before = (await page.evaluate(scripts.insertedTopics)).count;
+  const same = (names: string[]) => names.filter(n => n.toLowerCase() === tag.toLowerCase()).length;
+  let start = await page.evaluate(scripts.insertedTopics);
   await page.type('#');
   await delay(Math.min(timeout, 200));
   await page.type(tag);
   const deadline = Date.now() + Math.min(timeout, 5000);
+  let wrong = '';
+  let last: { x: number; y: number } | null = null;
   for (let attempts = 0; attempts < 3 && Date.now() < deadline;) {
     const at = await page.evaluate(scripts.topicTarget, tag);
-    if (!at) { await delay(Math.min(timeout, 200)); continue; }
+    // 候选列表随输入还在重画：同一项连续两次停在同一个位置才点，免得点到换上来的别的话题。
+    const settled = at && last && Math.abs(at.x - last.x) < 1 && Math.abs(at.y - last.y) < 1;
+    last = at;
+    if (!at || !settled) { await delay(Math.min(timeout, 150)); continue; }
     attempts++;
     await page.clickAt(at.x, at.y);
+    // 按名字核对：这次多出了同名话题就算选中。页面自己也会往正文里加话题（关联活动），不能只看最后一个。
     const settle = Date.now() + Math.min(timeout, 1000);
-    do {
-      const now = await page.evaluate(scripts.insertedTopics);
-      if (now.count > before) return now.last.toLowerCase() === tag.toLowerCase() ? 'picked' : { other: now.last };
-      await delay(50);
-    } while (Date.now() < settle);
+    let now = await page.evaluate(scripts.insertedTopics);
+    while (now.count === start.count && Date.now() < settle) { await delay(50); now = await page.evaluate(scripts.insertedTopics); }
+    if (now.count === start.count) continue;
+    if (same(now.names) > same(start.names)) return 'picked';
+    // 插错了：光标就在刚插进的话题后面，退格删掉它，重新输入再选。删不掉（客户端不让发按键）就照实提醒。
+    wrong = now.last;
+    if (!await page.press('Backspace')) return { other: wrong };
+    await delay(100);
+    if ((await page.evaluate(scripts.insertedTopics)).count >= now.count) return { other: wrong };
+    start = await page.evaluate(scripts.insertedTopics);
+    await page.type('#' + tag);
+    last = null;
   }
   await page.press('Escape');
   await page.type(' ', 0);
-  return 'missing';
+  return wrong ? { other: wrong } : 'missing';
 }
 
 /**
@@ -88,4 +103,22 @@ async function resumeDraft(page: Page, draft: Draft, progress: Progress, timeout
   if (await page.evaluate(scripts.editDraft, found)) return true;
   await page.press('Escape');
   return false;
+}
+
+/**
+ * 清掉正文里不在话题清单里的话题（小红书「关联活动」、旧草稿会自己带进来）：光标放到它后面按一次退格，
+ * 核对确实少了一个再删下一个。客户端不让发按键时只提醒，不去改编辑器的 DOM（会和编辑器的内部状态对不上）。
+ */
+async function removeExtraTopics(page: Page, tags: string[]): Promise<string[]> {
+  const removed: string[] = [];
+  for (let round = 0; round < 20; round++) {
+    const name = await page.evaluate(scripts.selectExtraTopic, tags);
+    if (!name) break;
+    const before = (await page.evaluate(scripts.insertedTopics)).count;
+    if (!await page.press('Backspace')) return [`正文里多了不在话题清单里的话题「${name}」，请在小红书页面手动删掉。`];
+    await delay(100);
+    if ((await page.evaluate(scripts.insertedTopics)).count >= before) return [`正文里多出的话题「${name}」没删掉，请在小红书页面手动删掉。`];
+    removed.push(name);
+  }
+  return removed.length ? [`已删掉正文里不在话题清单里的话题：${removed.join('、')}。`] : [];
 }

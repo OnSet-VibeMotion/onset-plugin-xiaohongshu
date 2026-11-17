@@ -40,16 +40,22 @@ export function topicTarget(tag: string): { x: number; y: number } | null {
   const r = item.getBoundingClientRect();
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
-/** 正文里已经插进去的话题（`a[data-topic]`）：个数与最后一个的名字（data-topic 是带 name 的 JSON）。 */
-export function insertedTopics(): { count: number; last: string } {
-  const nodes = [...document.querySelectorAll<HTMLElement>('a[data-topic]')];
+/** 正文编辑器里已经插进去的话题（`a[data-topic]`）：个数与最后一个的名字（data-topic 是带 name 的 JSON）。 */
+export function insertedTopics(): { count: number; last: string; names: string[] } {
+  // 只看正文编辑器：右边的笔记预览里也有一份话题。
+  const editor = [...document.querySelectorAll<HTMLElement>('.tiptap.ProseMirror[contenteditable="true"], .ProseMirror[contenteditable="true"], [contenteditable="true"][role="textbox"], [contenteditable="true"]')].find(e => e.getClientRects().length);
+  const nodes = editor ? [...editor.querySelectorAll<HTMLElement>('a[data-topic]')] : [];
   const node = nodes[nodes.length - 1];
+  const nameOf = (a: HTMLElement) => {
+    try { const n = String(JSON.parse(a.getAttribute('data-topic') ?? '{}').name ?? ''); if (n) return n.replace(/^#/, '').trim(); } catch { /* 按文字认 */ }
+    return (a.textContent ?? '').trim().replace(/^#/, '').replace(/\[话题\]#?$/, '');
+  };
   let last = '';
   if (node) {
     try { last = String(JSON.parse(node.getAttribute('data-topic') ?? '{}').name ?? ''); } catch { last = ''; }
     if (!last) last = (node.textContent ?? '').trim().replace(/^#/, '').replace(/\[话题\]#?$/, '');
   }
-  return { count: nodes.length, last: last.replace(/^#/, '').trim() };
+  return { count: nodes.length, last: last.replace(/^#/, '').trim(), names: nodes.map(nameOf) };
 }
 /**
  * 小红书把视频笔记的草稿存在这个浏览器本地（IndexedDB `draft-database-v1` 的 `video-draft`），
@@ -99,6 +105,25 @@ export function pointerClick({ x, y }: { x: number; y: number }): boolean {
   target.dispatchEvent(new PointerEvent('pointerup', init)); target.dispatchEvent(new MouseEvent('mouseup', init));
   target.dispatchEvent(new MouseEvent('click', init));
   return true;
+}
+/**
+ * 正文里第一个不在清单里的话题（小红书「关联活动」、旧草稿会自己带进来），把光标放在它后面，
+ * 好让一次退格把它整个删掉。返回它的名字；没有了返回 ''。
+ */
+export function selectExtraTopic(keep: string[]): string {
+  const editor = [...document.querySelectorAll<HTMLElement>('.tiptap.ProseMirror[contenteditable="true"], .ProseMirror[contenteditable="true"], [contenteditable="true"][role="textbox"], [contenteditable="true"]')].find(e => e.getClientRects().length);
+  if (!editor) return '';
+  const wanted = new Set(keep.map(k => k.replace(/^#/, '').trim().toLowerCase()));
+  const nameOf = (a: Element) => {
+    try { const n = String(JSON.parse(a.getAttribute('data-topic') ?? '{}').name ?? ''); if (n) return n; } catch { /* 按文字认 */ }
+    return (a.textContent ?? '').trim().replace(/^#/, '').replace(/\[话题\]#?$/, '');
+  };
+  const extra = [...editor.querySelectorAll('a[data-topic]')].find(a => !wanted.has(nameOf(a).trim().toLowerCase()));
+  if (!extra) return '';
+  editor.focus();
+  const range = document.createRange(); range.setStartAfter(extra); range.collapse(true);
+  const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+  return nameOf(extra);
 }
 export function fillTitle(value: string): void {
   const input = [...document.querySelectorAll<HTMLInputElement>('input[placeholder*="标题"], div.d-input input')].find(e => e.getClientRects().length);

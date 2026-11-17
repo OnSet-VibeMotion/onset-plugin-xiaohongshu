@@ -138,8 +138,26 @@ it('逐字输入话题、按话题名点中候选（不被浏览量和同前缀�
   const warnings = await preparePage(page, { title: '标题', content: '正文', tags: ['科技', 'ai', '冷门话题'], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') }, () => {}, { timeout: 2000 });
   expect(warnings).toHaveLength(1); expect(warnings[0]).toContain('冷门话题');
   expect(await page.evaluate(() => [...document.querySelectorAll('a[data-topic]')].map(a => JSON.parse(a.getAttribute('data-topic')!).name))).toEqual(['科技', 'AI']);
-  expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toMatch(/^正文\n#科技\[话题\]# ?#AI\[话题\]# ?#冷门话题\s$/);
+  expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toMatch(/^正文\n#科技\[话题\]#\s?#AI\[话题\]#\s?#冷门话题\s$/);
   expect(await page.evaluate(() => (window as any).submits)).toBe(0);
+});
+it('候选列表重画、点下去插错了话题：等位置稳定再点，插错的退格删掉重选，只看正文里的话题', async () => {
+  const { page } = await pageFor('topic-race');
+  await page.evaluate(() => {
+    (window as any).hotTopic = 'vibe知识大赏'; (window as any).misfire = 1;
+    // 右边的笔记预览也有一份话题，核对时不能算进去。
+    const preview = document.createElement('div'); preview.innerHTML = '<a data-topic=\'{"name":"预览里的"}\'>#预览里的</a>'; document.body.append(preview);
+  });
+  const warnings = await preparePage(page, { title: '标题', content: '正文', tags: ['科技', 'AI'], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') }, () => {}, { timeout: 3000 });
+  expect(warnings).toEqual([]);
+  expect(await page.evaluate(() => [...document.querySelectorAll('[contenteditable] a[data-topic]')].map(a => JSON.parse(a.getAttribute('data-topic')!).name))).toEqual(['科技', 'AI']);
+});
+it('页面自己加进来的、不在清单里的话题（关联活动、旧草稿）在准备完之前删掉，并告诉用户', async () => {
+  const { page } = await pageFor('extra-topics');
+  await page.evaluate(() => { (window as any).autoTopic = 'AI替我说'; });
+  const warnings = await preparePage(page, { title: '标题', content: '正文', tags: ['科技', 'AI'], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') }, () => {}, { timeout: 3000 });
+  expect(await page.evaluate(() => [...document.querySelectorAll('[contenteditable] a[data-topic]')].map(a => JSON.parse(a.getAttribute('data-topic')!).name))).toEqual(['科技', 'AI']);
+  expect(warnings).toEqual(['已删掉正文里不在话题清单里的话题：AI替我说。']);
 });
 it('片场客户端不放行键盘与鼠标事件（旧版）时不整个失败：退回插入文字，话题留成文字并提醒', async () => {
   const { page } = await pageFor('old-client');
