@@ -122,6 +122,10 @@ it('未匹配的话题保留文字并明确提醒用户，封面失败不能算�
   expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toContain('#科技');
   await page.evaluate(() => document.querySelector('.upload-cover')?.remove());
   await expect(preparePage(page, { ...draft, tags: [] }, () => {}, { timeout: 100 })).rejects.toThrow('封面');
+  // 没有登记封面：不去点设置封面（入口已经没了也不报错），提醒一句。
+  const noCover = await preparePage(page, { ...draft, tags: [], cover: '' }, () => {}, { timeout: 100 }).catch((err: Error) => err);
+  expect(noCover instanceof Error ? noCover.message : '').not.toContain('封面');
+
   expect(await page.evaluate(() => (window as any).submits)).toBe(0);
 });
 it('匹配到准确的话题时选中候选，确认封面不触及其他确认弹窗', async () => {

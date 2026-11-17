@@ -31,16 +31,20 @@ export async function preparePage(page: Page, draft: Draft, progress: Progress, 
       await page.raw('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     }
   }
-  progress(0.75, '正在设置封面');
-  if (!await page.click('div.upload-cover, button.upload-cover, .cover-plugin-preview .default.pointer')
-    && !await page.click('button', '设置封面')) throw Error('找不到设置封面的入口，请在小红书页面手动设置封面');
-  await page.waitFor(scripts.coverDialogOpen, Math.min(timeout, 15_000), '封面窗口没有打开');
-  if (!await page.click('.d-modal *, [role="dialog"] *', '上传封面')) throw Error('找不到「上传封面」，请在小红书页面手动设置封面');
-  await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', draft.cover);
-  await delay(Math.min(timeout, 1000));
-  await page.waitFor(scripts.coverConfirmReady, Math.min(timeout, 15_000), '封面尚未处理完成');
-  if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', '确定')) throw Error('封面没有确认成功');
-  await page.waitFor(scripts.coverDialogClosed, Math.min(timeout, 15_000), '封面尚未保存，请在小红书窗口检查');
+  if (!draft.cover) {
+    warnings.push('发布信息里没有登记封面，小红书会用视频首帧；需要的话请在小红书页面手动设置封面。');
+  } else {
+    progress(0.75, '正在设置封面');
+    if (!await page.click('div.upload-cover, button.upload-cover, .cover-plugin-preview .default.pointer')
+      && !await page.click('button', '设置封面')) throw Error('找不到设置封面的入口，请在小红书页面手动设置封面');
+    await page.waitFor(scripts.coverDialogOpen, Math.min(timeout, 15_000), '封面窗口没有打开');
+    if (!await page.click('.d-modal *, [role="dialog"] *', '上传封面')) throw Error('找不到「上传封面」，请在小红书页面手动设置封面');
+    await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', draft.cover);
+    await delay(Math.min(timeout, 1000));
+    await page.waitFor(scripts.coverConfirmReady, Math.min(timeout, 15_000), '封面尚未处理完成');
+    if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', '确定')) throw Error('封面没有确认成功');
+    await page.waitFor(scripts.coverDialogClosed, Math.min(timeout, 15_000), '封面尚未保存，请在小红书窗口检查');
+  }
   // Readiness only: do not click. Upload progress can coexist with an editable form.
   await page.waitFor(scripts.publishReady, Math.min(timeout, 180_000), '内容已填写，但小红书尚未允许发布，请在窗口检查上传进度或校验提示');
   progress(1, '内容已填好，请在小红书页面检查并手动发布');

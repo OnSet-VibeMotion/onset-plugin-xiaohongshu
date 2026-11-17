@@ -88,17 +88,41 @@ describe('发布素材', () => {
     expect(d.cover).toBe(path.join(root, 'cover.png')); expect(d.videoHash).toMatch(/^[a-f0-9]{64}$/);
   });
   it.each([
-    { platform: 'douyin' }, { publish_status: 'blocked' },
     { copy: { primary_title: '', introduction: '正文' } },
     { video: { path: '../outside.mp4' } }, { video: { path: 'missing.mp4' } },
     { video: { path: 'cover.png' } }, { video: { path: 'final.mp4', sha256: 'a'.repeat(64) } },
-    { cover: { images: [] } }, { credits: { required: true, text: '' } },
+    { credits: { required: true, text: '' } },
     { video: { path: 'final.mp4', replacement_in_progress: true } },
     { copy: { primary_title: '标题', introduction: '字'.repeat(1001), hashtags: [] } },
     { copy: { primary_title: '标题', introduction: '正文', hashtags: Array(11).fill('话题') } },
     { copy: { primary_title: '标题', introduction: '正文', hashtags: ['坏\n标签'] } },
   ])('拒绝不完整或不匹配的素材 %j', async (over) => {
     await expect(readDraft(project(over))).rejects.toThrow();
+  });
+  // 只看小红书要的数据够不够：主平台是别的、按主平台查出的问题，都不挡这里。
+  it('主平台不是小红书、主平台还有问题时照样能做', async () => {
+    const root = project({ platform: 'douyin', publish_status: 'blocked' });
+    expect((await readDraft(root)).title).toBe('测试标题');
+  });
+  it('标题优先用为小红书单独写的；主标题超过 20 字时说清怎么补', async () => {
+    const own = await readDraft(project({ copy: { primary_title: '长'.repeat(25), introduction: '正文', platform_titles: { xiaohongshu: '小红书的标题', douyin: '抖音的' } } }));
+    expect(own.title).toBe('小红书的标题');
+    await expect(readDraft(project({ copy: { primary_title: '长'.repeat(25), introduction: '正文' } }))).rejects.toThrow('copy.platform_titles.xiaohongshu');
+  });
+  it('封面按小红书 3:4、小红书其他、任何 3:4、任何一张的顺序挑；没有就不设', async () => {
+    const pick = async (images: unknown[] | undefined) => {
+      const root = project({ cover: images === undefined ? {} : { images } });
+      for (const name of ['a.png', 'b.png', 'c.png']) fs.writeFileSync(path.join(root, name), 'image');
+      const cover = (await readDraft(root)).cover;
+      return cover ? path.basename(cover) : '';
+    };
+    expect(await pick([{ platform: 'douyin', ratio: '3:4', path: 'a.png' }, { platform: 'xiaohongshu', ratio: '1:1', path: 'b.png' }])).toBe('b.png');
+    expect(await pick([{ platform: 'douyin', ratio: '4:3', path: 'a.png' }, { platform: 'bilibili', ratio: '3:4', path: 'c.png' }])).toBe('c.png');
+    expect(await pick([{ platform: 'bilibili', ratio: '16:10', path: 'a.png' }])).toBe('a.png');
+    // 同一张图登记给几个平台不算分不清。
+    expect(await pick([{ platform: 'douyin', ratio: '3:4', path: 'a.png' }, { platform: 'shipinhao', ratio: '3:4', path: 'a.png' }])).toBe('a.png');
+    expect(await pick([])).toBe('');
+    expect(await pick(undefined)).toBe('');
   });
   it('不截断标题，不悄悄忽略多张候选封面', async () => {
     await expect(readDraft(project({ copy: { primary_title: '长'.repeat(21), introduction: '正文' } }))).rejects.toThrow('标题');

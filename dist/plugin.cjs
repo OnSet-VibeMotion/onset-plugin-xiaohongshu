@@ -7764,12 +7764,14 @@ async function readDraft(root) {
   const doc = (0, import_yaml.parseDocument)(match[1], { uniqueKeys: true });
   if (doc.errors.length) throw Error("publish.md \u7684 YAML \u683C\u5F0F\u6709\u8BEF");
   const d = record(doc.toJS({ maxAliasCount: 20 }));
-  if (d.platform !== "xiaohongshu") throw Error("\u8BF7\u5148\u5728\u7247\u573A\u5C06\u53D1\u5E03\u5E73\u53F0\u8BBE\u4E3A\u5C0F\u7EA2\u4E66");
-  if (d.publish_status === "blocked") throw Error("\u53D1\u5E03\u4FE1\u606F\u4ECD\u6709\u963B\u585E\u95EE\u9898\uFF0C\u8BF7\u5148\u5728\u7247\u573A\u5904\u7406");
   const copy = record(d.copy), video = record(d.video), cover = record(d.cover);
   if (video.replacement_in_progress === true) throw Error("\u6210\u7247\u4ECD\u5728\u66FF\u6362\u4E2D");
-  const title = text(copy.primary_title, "\u6807\u9898");
-  if ([...title].length > 20) throw Error("\u6807\u9898\u8D85\u8FC7 20 \u5B57\uFF0C\u8BF7\u5148\u4FEE\u6539\u6807\u9898");
+  const platformTitles = copy.platform_titles ? record(copy.platform_titles) : {};
+  const ownTitle = typeof platformTitles.xiaohongshu === "string" && platformTitles.xiaohongshu.trim() !== "";
+  const title = text(ownTitle ? platformTitles.xiaohongshu : copy.primary_title, "\u6807\u9898");
+  if ([...title].length > 20) {
+    throw Error(ownTitle ? "\u5C0F\u7EA2\u4E66\u6807\u9898\u8D85\u8FC7 20 \u5B57\uFF0C\u8BF7\u5148\u4FEE\u6539" : "\u6807\u9898\u8D85\u8FC7 20 \u5B57\uFF08\u5C0F\u7EA2\u4E66\u7684\u4E0A\u9650\uFF09\uFF1A\u8BF7\u5728\u7247\u573A\u7ED9\u5C0F\u7EA2\u4E66\u5355\u72EC\u5199\u4E00\u4E2A\u6807\u9898\uFF08copy.platform_titles.xiaohongshu\uFF09");
+  }
   let content = text(copy.introduction, "\u6B63\u6587");
   const credits = d.credits ? record(d.credits) : null;
   if (credits?.required === true) {
@@ -7792,14 +7794,24 @@ ${attribution}`;
   for await (const chunk of import_node_fs3.default.createReadStream(videoPath)) hash.update(chunk);
   const videoHash = hash.digest("hex");
   if (video.sha256 && video.sha256 !== videoHash) throw Error("\u6210\u7247\u5DF2\u53D8\u52A8\uFF0C\u8BF7\u5148\u5237\u65B0\u53D1\u5E03\u4FE1\u606F");
-  if (!Array.isArray(cover.images)) throw Error("\u7F3A\u5C11\u5C0F\u7EA2\u4E66\u5C01\u9762");
-  const candidates = cover.images.map(record).filter((c) => c.platform === "xiaohongshu");
-  const portrait = candidates.filter((c) => c.ratio === "3:4");
-  const selected = portrait.length ? portrait : candidates;
-  if (selected.length !== 1) throw Error("\u9700\u8981\u4E00\u5F20\u660E\u786E\u7684\u5C0F\u7EA2\u4E66\u5C01\u9762\uFF0C\u4F18\u5148\u9009\u62E9 3:4 \u5C01\u9762");
-  const coverPath = projectFile(root, text(selected[0].path, "\u5C01\u9762\u8DEF\u5F84"));
-  if (![".png", ".jpg", ".jpeg", ".webp"].includes(import_node_path3.default.extname(coverPath).toLowerCase()) || import_node_fs3.default.statSync(coverPath).size === 0) throw Error("\u5C01\u9762\u9700\u8981\u975E\u7A7A\u7684 PNG\u3001JPEG \u6216 WebP \u56FE\u7247");
+  const coverPath = pickCover(root, cover.images);
   return { title, content, tags: normalizedTags, video: videoPath, videoHash, cover: coverPath };
+}
+function pickCover(root, images) {
+  if (images === void 0) return "";
+  if (!Array.isArray(images)) throw Error("\u5C01\u9762\u767B\u8BB0\u683C\u5F0F\u4E0D\u6B63\u786E");
+  const all = images.map(record);
+  const own = all.filter((c) => c.platform === "xiaohongshu");
+  const tiers = [own.filter((c) => c.ratio === "3:4"), own, all.filter((c) => c.ratio === "3:4"), all];
+  for (const tier of tiers) {
+    const paths = [...new Set(tier.map((c) => text(c.path, "\u5C01\u9762\u8DEF\u5F84")))];
+    if (paths.length === 0) continue;
+    if (paths.length > 1) throw Error("\u6709\u51E0\u5F20\u5019\u9009\u5C01\u9762\uFF0C\u5206\u4E0D\u6E05\u7528\u54EA\u5F20\uFF1A\u8BF7\u5728\u7247\u573A\u7ED9\u5C0F\u7EA2\u4E66\u767B\u8BB0\u4E00\u5F20 3:4 \u5C01\u9762");
+    const file = projectFile(root, paths[0]);
+    if (![".png", ".jpg", ".jpeg", ".webp"].includes(import_node_path3.default.extname(file).toLowerCase()) || import_node_fs3.default.statSync(file).size === 0) throw Error("\u5C01\u9762\u9700\u8981\u975E\u7A7A\u7684 PNG\u3001JPEG \u6216 WebP \u56FE\u7247");
+    return file;
+  }
+  return "";
 }
 
 // src/prepare.ts
@@ -7831,15 +7843,19 @@ async function preparePage(page, draft, progress, options = {}) {
       await page.raw("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     }
   }
-  progress(0.75, "\u6B63\u5728\u8BBE\u7F6E\u5C01\u9762");
-  if (!await page.click("div.upload-cover, button.upload-cover, .cover-plugin-preview .default.pointer") && !await page.click("button", "\u8BBE\u7F6E\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u8BBE\u7F6E\u5C01\u9762\u7684\u5165\u53E3\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
-  await page.waitFor(coverDialogOpen, Math.min(timeout, 15e3), "\u5C01\u9762\u7A97\u53E3\u6CA1\u6709\u6253\u5F00");
-  if (!await page.click('.d-modal *, [role="dialog"] *', "\u4E0A\u4F20\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u300C\u4E0A\u4F20\u5C01\u9762\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
-  await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', draft.cover);
-  await delay(Math.min(timeout, 1e3));
-  await page.waitFor(coverConfirmReady, Math.min(timeout, 15e3), "\u5C01\u9762\u5C1A\u672A\u5904\u7406\u5B8C\u6210");
-  if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', "\u786E\u5B9A")) throw Error("\u5C01\u9762\u6CA1\u6709\u786E\u8BA4\u6210\u529F");
-  await page.waitFor(coverDialogClosed, Math.min(timeout, 15e3), "\u5C01\u9762\u5C1A\u672A\u4FDD\u5B58\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
+  if (!draft.cover) {
+    warnings.push("\u53D1\u5E03\u4FE1\u606F\u91CC\u6CA1\u6709\u767B\u8BB0\u5C01\u9762\uFF0C\u5C0F\u7EA2\u4E66\u4F1A\u7528\u89C6\u9891\u9996\u5E27\uFF1B\u9700\u8981\u7684\u8BDD\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762\u3002");
+  } else {
+    progress(0.75, "\u6B63\u5728\u8BBE\u7F6E\u5C01\u9762");
+    if (!await page.click("div.upload-cover, button.upload-cover, .cover-plugin-preview .default.pointer") && !await page.click("button", "\u8BBE\u7F6E\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u8BBE\u7F6E\u5C01\u9762\u7684\u5165\u53E3\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+    await page.waitFor(coverDialogOpen, Math.min(timeout, 15e3), "\u5C01\u9762\u7A97\u53E3\u6CA1\u6709\u6253\u5F00");
+    if (!await page.click('.d-modal *, [role="dialog"] *', "\u4E0A\u4F20\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u300C\u4E0A\u4F20\u5C01\u9762\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+    await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', draft.cover);
+    await delay(Math.min(timeout, 1e3));
+    await page.waitFor(coverConfirmReady, Math.min(timeout, 15e3), "\u5C01\u9762\u5C1A\u672A\u5904\u7406\u5B8C\u6210");
+    if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', "\u786E\u5B9A")) throw Error("\u5C01\u9762\u6CA1\u6709\u786E\u8BA4\u6210\u529F");
+    await page.waitFor(coverDialogClosed, Math.min(timeout, 15e3), "\u5C01\u9762\u5C1A\u672A\u4FDD\u5B58\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
+  }
   await page.waitFor(publishReady, Math.min(timeout, 18e4), "\u5185\u5BB9\u5DF2\u586B\u5199\uFF0C\u4F46\u5C0F\u7EA2\u4E66\u5C1A\u672A\u5141\u8BB8\u53D1\u5E03\uFF0C\u8BF7\u5728\u7A97\u53E3\u68C0\u67E5\u4E0A\u4F20\u8FDB\u5EA6\u6216\u6821\u9A8C\u63D0\u793A");
   progress(1, "\u5185\u5BB9\u5DF2\u586B\u597D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5\u5E76\u624B\u52A8\u53D1\u5E03");
   return warnings;
