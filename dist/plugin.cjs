@@ -7488,7 +7488,7 @@ var AccountStore = class {
       release();
     }
   }
-  /** 删掉账号资料与它的登录状态（片场开的网页存储）。 */
+  /** 删掉账号资料，连同旧版留在 data_dir/web-sessions 下的网页存储（现在的登录状态由片场在 forget 时清掉）。 */
   removeFiles(id) {
     if (!accountID.test(id)) throw Error("\u8D26\u53F7\u7F16\u53F7\u65E0\u6548");
     import_node_fs2.default.rmSync(import_node_path2.default.join(this.root, id), { recursive: true, force: true });
@@ -7567,6 +7567,29 @@ function clickControl({ selector, exactText }) {
   if (/^(发布|立即发布|定时发布|确认发布)$/.test(element.textContent?.trim() ?? "") || element.closest(".publish-page-publish-btn, xhs-publish-btn")) throw Error("\u63D2\u4EF6\u4E0D\u5141\u8BB8\u70B9\u51FB\u53D1\u5E03\u6309\u94AE");
   element.click();
   return true;
+}
+function topicTarget(tag) {
+  const norm = (s) => s.trim().replace(/^#/, "").replace(/\[话题\]#?$/, "").trim().toLowerCase();
+  const items = [...document.querySelectorAll('#creator-editor-topic-container .item, .topic-container .item, .topic-list .item, [role="option"]')].filter((e) => e.getClientRects().length);
+  const item = items.find((e) => norm((e.querySelector(".name") ?? e).textContent ?? "") === norm(tag));
+  if (!item) return null;
+  item.scrollIntoView({ block: "nearest" });
+  const r = item.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+function insertedTopics() {
+  const nodes = [...document.querySelectorAll("a[data-topic]")];
+  const node = nodes[nodes.length - 1];
+  let last = "";
+  if (node) {
+    try {
+      last = String(JSON.parse(node.getAttribute("data-topic") ?? "{}").name ?? "");
+    } catch {
+      last = "";
+    }
+    if (!last) last = (node.textContent ?? "").trim().replace(/^#/, "").replace(/\[话题\]#?$/, "");
+  }
+  return { count: nodes.length, last: last.replace(/^#/, "").trim() };
 }
 function fillTitle(value) {
   const input = [...document.querySelectorAll('input[placeholder*="\u6807\u9898"], div.d-input input')].find((e) => e.getClientRects().length);
@@ -7678,6 +7701,24 @@ var Page = class _Page {
   }
   async click(selector, exactText) {
     return this.evaluate(clickControl, { selector, exactText });
+  }
+  /** 像人一样逐字打：小红书的话题候选靠逐字输入「#」触发。 */
+  async type(text2, gap = 50) {
+    for (const ch of text2) {
+      await this.raw("Input.insertText", { text: ch });
+      if (gap) await delay(gap);
+    }
+  }
+  async press(key) {
+    const code = key === "Enter" ? 13 : 27;
+    await this.raw("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: code, ...key === "Enter" ? { text: "\r" } : {} });
+    await this.raw("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: code });
+  }
+  /** 真的点一下鼠标（候选项可能只认鼠标事件，不认 element.click()）。 */
+  async clickAt(x, y) {
+    await this.raw("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await this.raw("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    await this.raw("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
   }
   async fillTitle(title) {
     await this.evaluate(fillTitle, title);
@@ -7827,20 +7868,13 @@ async function preparePage(page, draft, progress, options = {}) {
   await page.fillTitle(draft.title);
   await page.fillContent(draft.content);
   const warnings = [];
-  for (const tag of draft.tags) {
-    await page.raw("Input.insertText", { text: `
-#${tag}` });
-    let matched = false;
-    const deadline = Date.now() + Math.min(timeout, 3e3);
-    do {
-      matched = await page.click('.topic-container .item, .topic-list .item, [role="option"]', `#${tag}`) || await page.click('.topic-container .item, .topic-list .item, [role="option"]', tag);
-      if (matched) break;
-      await delay(200);
-    } while (Date.now() < deadline);
-    if (!matched) {
-      warnings.push(`\u8BDD\u9898\u300C${tag}\u300D\u5DF2\u586B\u4E3A\u6587\u5B57\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u786E\u8BA4\u8BDD\u9898\u8BC6\u522B\u3002`);
-      await page.raw("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-      await page.raw("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  if (draft.tags.length) {
+    await page.press("Enter");
+    for (const tag of draft.tags) {
+      const outcome = await insertTopic(page, tag, timeout);
+      if (outcome === "picked") continue;
+      if (outcome === "missing") warnings.push(`\u5C0F\u7EA2\u4E66\u6CA1\u6709\u627E\u5230\u8BDD\u9898\u300C${tag}\u300D\uFF0C\u5DF2\u586B\u4E3A\u6587\u5B57\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u786E\u8BA4\u3002`);
+      else warnings.push(`\u8BDD\u9898\u300C${tag}\u300D\u88AB\u8BC6\u522B\u6210\u4E86\u300C${outcome.other}\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5\u3002`);
     }
   }
   if (!draft.cover) {
@@ -7859,6 +7893,31 @@ async function preparePage(page, draft, progress, options = {}) {
   await page.waitFor(publishReady, Math.min(timeout, 18e4), "\u5185\u5BB9\u5DF2\u586B\u5199\uFF0C\u4F46\u5C0F\u7EA2\u4E66\u5C1A\u672A\u5141\u8BB8\u53D1\u5E03\uFF0C\u8BF7\u5728\u7A97\u53E3\u68C0\u67E5\u4E0A\u4F20\u8FDB\u5EA6\u6216\u6821\u9A8C\u63D0\u793A");
   progress(1, "\u5185\u5BB9\u5DF2\u586B\u597D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5\u5E76\u624B\u52A8\u53D1\u5E03");
   return warnings;
+}
+async function insertTopic(page, tag, timeout) {
+  const before = (await page.evaluate(insertedTopics)).count;
+  await page.type("#");
+  await delay(Math.min(timeout, 200));
+  await page.type(tag);
+  const deadline = Date.now() + Math.min(timeout, 5e3);
+  for (let attempts = 0; attempts < 3 && Date.now() < deadline; ) {
+    const at = await page.evaluate(topicTarget, tag);
+    if (!at) {
+      await delay(Math.min(timeout, 200));
+      continue;
+    }
+    attempts++;
+    await page.clickAt(at.x, at.y);
+    const settle = Date.now() + Math.min(timeout, 1e3);
+    do {
+      const now = await page.evaluate(insertedTopics);
+      if (now.count > before) return now.last.toLowerCase() === tag.toLowerCase() ? "picked" : { other: now.last };
+      await delay(50);
+    } while (Date.now() < settle);
+  }
+  await page.press("Escape");
+  await page.type(" ", 0);
+  return "missing";
 }
 
 // src/app.ts

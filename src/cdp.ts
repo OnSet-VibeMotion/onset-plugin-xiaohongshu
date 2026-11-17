@@ -100,6 +100,21 @@ export class Page {
   async click(selector: string, exactText?: string): Promise<boolean> {
     return this.evaluate(scripts.clickControl, { selector, exactText });
   }
+  /** 像人一样逐字打：小红书的话题候选靠逐字输入「#」触发。 */
+  async type(text: string, gap = 50): Promise<void> {
+    for (const ch of text) { await this.raw('Input.insertText', { text: ch }); if (gap) await delay(gap); }
+  }
+  async press(key: 'Enter' | 'Escape'): Promise<void> {
+    const code = key === 'Enter' ? 13 : 27;
+    await this.raw('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code, ...(key === 'Enter' ? { text: '\r' } : {}) });
+    await this.raw('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code });
+  }
+  /** 真的点一下鼠标（候选项可能只认鼠标事件，不认 element.click()）。 */
+  async clickAt(x: number, y: number): Promise<void> {
+    await this.raw('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    await this.raw('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+    await this.raw('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+  }
   async fillTitle(title: string): Promise<void> {
     await this.evaluate(scripts.fillTitle, title);
   }

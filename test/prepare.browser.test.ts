@@ -116,10 +116,11 @@ it('页面操作边界、缺失控件和 CDP 断开都会返回清楚的错误',
 });
 it('未匹配的话题保留文字并明确提醒用户，封面失败不能算准备完成', async () => {
   const { page } = await pageFor('tags');
-  const draft = { title: '标题', content: '正文', tags: ['科技'], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') };
+  const draft = { title: '标题', content: '正文', tags: ['冷门话题'], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') };
   const warnings = await preparePage(page, draft, () => {}, { timeout: 100 });
-  expect(warnings[0]).toContain('科技');
-  expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toContain('#科技');
+  expect(warnings[0]).toContain('冷门话题');
+  expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toContain('#冷门话题');
+  expect(await page.evaluate(() => document.querySelectorAll('a[data-topic]').length)).toBe(0);
   await page.evaluate(() => document.querySelector('.upload-cover')?.remove());
   await expect(preparePage(page, { ...draft, tags: [] }, () => {}, { timeout: 100 })).rejects.toThrow('封面');
   // 没有登记封面：不去点设置封面（入口已经没了也不报错），提醒一句。
@@ -128,16 +129,16 @@ it('未匹配的话题保留文字并明确提醒用户，封面失败不能算�
 
   expect(await page.evaluate(() => (window as any).submits)).toBe(0);
 });
-it('匹配到准确的话题时选中候选，确认封面不触及其他确认弹窗', async () => {
+it('逐字输入话题、按话题名点中候选（不被浏览量和同前缀的话题干扰），确认封面不触及其他确认弹窗', async () => {
   const { page } = await pageFor('topic-selected');
   await page.evaluate(() => {
-    const topic = document.createElement('button'); topic.setAttribute('role', 'option'); topic.textContent = '#科技';
-    topic.onclick = () => { (window as any).topicSelected = true; }; document.body.append(topic);
     const unrelated = document.createElement('div'); unrelated.setAttribute('role', 'dialog'); unrelated.hidden = true;
     unrelated.innerHTML = '<button>确定</button>'; document.body.append(unrelated);
   });
-  const warnings = await preparePage(page, { title: '标题', content: '正文', tags: ['科技'], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') }, () => {}, { timeout: 500 });
-  expect(warnings).toEqual([]); expect(await page.evaluate(() => (window as any).topicSelected)).toBe(true);
+  const warnings = await preparePage(page, { title: '标题', content: '正文', tags: ['科技', 'ai', '冷门话题'], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') }, () => {}, { timeout: 2000 });
+  expect(warnings).toHaveLength(1); expect(warnings[0]).toContain('冷门话题');
+  expect(await page.evaluate(() => [...document.querySelectorAll('a[data-topic]')].map(a => JSON.parse(a.getAttribute('data-topic')!).name))).toEqual(['科技', 'AI']);
+  expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toMatch(/^正文\n#科技\[话题\]# ?#AI\[话题\]# ?#冷门话题\s$/);
   expect(await page.evaluate(() => (window as any).submits)).toBe(0);
 });
 it('视频尚未处理完成或平台校验不通过时不能报告已准备好', async () => {

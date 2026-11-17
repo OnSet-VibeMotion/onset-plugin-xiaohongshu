@@ -25,6 +25,32 @@ export function clickControl({ selector, exactText }: { selector: string; exactT
   if (/^(发布|立即发布|定时发布|确认发布)$/.test(element.textContent?.trim() ?? '') || element.closest('.publish-page-publish-btn, xhs-publish-btn')) throw Error('插件不允许点击发布按钮');
   element.click(); return true;
 }
+/**
+ * 话题候选里与 tag 同名的那一项的中心点（页面坐标），没有就返回 null。小红书的候选是
+ * `#creator-editor-topic-container .item`，话题名在 `.name` 里，同一项里还有浏览量，所以不能按整项文字比。
+ * 比较时忽略开头的 # 和大小写。
+ */
+export function topicTarget(tag: string): { x: number; y: number } | null {
+  const norm = (s: string) => s.trim().replace(/^#/, '').replace(/\[话题\]#?$/, '').trim().toLowerCase();
+  const items = [...document.querySelectorAll<HTMLElement>('#creator-editor-topic-container .item, .topic-container .item, .topic-list .item, [role="option"]')]
+    .filter(e => e.getClientRects().length);
+  const item = items.find(e => norm((e.querySelector('.name') ?? e).textContent ?? '') === norm(tag));
+  if (!item) return null;
+  item.scrollIntoView({ block: 'nearest' });
+  const r = item.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+/** 正文里已经插进去的话题（`a[data-topic]`）：个数与最后一个的名字（data-topic 是带 name 的 JSON）。 */
+export function insertedTopics(): { count: number; last: string } {
+  const nodes = [...document.querySelectorAll<HTMLElement>('a[data-topic]')];
+  const node = nodes[nodes.length - 1];
+  let last = '';
+  if (node) {
+    try { last = String(JSON.parse(node.getAttribute('data-topic') ?? '{}').name ?? ''); } catch { last = ''; }
+    if (!last) last = (node.textContent ?? '').trim().replace(/^#/, '').replace(/\[话题\]#?$/, '');
+  }
+  return { count: nodes.length, last: last.replace(/^#/, '').trim() };
+}
 export function fillTitle(value: string): void {
   const input = [...document.querySelectorAll<HTMLInputElement>('input[placeholder*="标题"], div.d-input input')].find(e => e.getClientRects().length);
   if (!input) throw Error('找不到标题输入框');

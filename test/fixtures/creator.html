@@ -12,4 +12,24 @@ document.querySelector('.upload-input').onchange=e=>{uploads.push(e.target.files
 document.querySelector('.upload-cover').onclick=()=>document.querySelector('.d-modal').hidden=false;
 document.querySelector('#confirm').onclick=()=>{document.querySelector('.d-modal').hidden=true;document.querySelector('.upload-cover').textContent='编辑封面';};
 document.querySelector('#publish').onclick=()=>submits++;
+
+// 仿小红书的话题候选：正文末尾是「#xx」时弹出同前缀的话题（每项有 .name 与浏览量），只认真实的鼠标点击，
+// 点中后把「#xx」换成 a[data-topic]。
+window.knownTopics=['科技','科技感','AI'];
+const editor=document.querySelector('[contenteditable]');
+const box=document.createElement('div');box.id='creator-editor-topic-container';box.hidden=true;document.body.append(box);
+function lastText(){const w=document.createTreeWalker(editor,NodeFilter.SHOW_TEXT);let n=null,t;while((t=w.nextNode()))n=t;return n;}
+editor.addEventListener('input',()=>{
+  const node=lastText(); const m=node&&/#([^\s#]+)$/.exec(node.data);
+  const hits=m?knownTopics.filter(t=>t.toLowerCase().startsWith(m[1].toLowerCase())):[];
+  box.innerHTML=hits.map(t=>'<div class="item"><span class="name">#'+t+'</span><span class="num">10亿次浏览</span></div>').join('');
+  box.hidden=!hits.length;
+  box.querySelectorAll('.item').forEach((item,i)=>item.addEventListener('click',e=>{
+    if(!e.isTrusted)return;
+    const text=lastText(); const at=text.data.lastIndexOf('#'); text.data=text.data.slice(0,at);
+    const a=document.createElement('a'); a.setAttribute('data-topic',JSON.stringify({name:hits[i]})); a.textContent='#'+hits[i]+'[话题]#';
+    const after=document.createTextNode(' '); text.after(a,after); box.hidden=true;
+    editor.focus(); const r=document.createRange(); r.setStart(after,1); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r);
+  }));
+});
 </script></body></html>

@@ -4,7 +4,7 @@
     "onset": "0.1.0"
   },
   "id": "xiaohongshu-upload",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "name": "小红书上传助手",
   "description": "选择小红书账号，在片场客户端内自动上传成片、封面并填入文案，最后由你检查并发布。",
   "after": "publish",
