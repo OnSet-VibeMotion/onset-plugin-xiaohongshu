@@ -1,5 +1,7 @@
 <!doctype html><html lang="zh"><body>
 <button class="creator-tab">上传视频</button>
+<div class="header-draft"><div class="draft-title-box"><span class="draft-title">草稿箱</span></div></div>
+<div class="d-drawer d-drawer-right draft-drawer" hidden><div class="d-drawer-content"><div class="draft-list"></div></div></div>
 <input type="file" class="upload-input" accept="video/*">
 <p id="progress">请上传视频</p>
 <input placeholder="填写标题"><div contenteditable="true" class="tiptap ProseMirror" style="min-height:60px"></div>
@@ -32,4 +34,17 @@ editor.addEventListener('input',()=>{
     editor.focus(); const r=document.createRange(); r.setStart(after,1); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r);
   }));
 });
+
+// 仿小红书的草稿箱：草稿在本机 IndexedDB（draft-database-v1 / video-draft），抽屉里按标题与保存时间列出，
+// 点「编辑」直接回到视频已上传、可以填写的状态。
+document.querySelector('.draft-title').onclick=async()=>{
+  const recs=await new Promise(r=>{const o=indexedDB.open('draft-database-v1');o.onsuccess=()=>{const db=o.result;if(![...db.objectStoreNames].includes('video-draft')){r([]);return;}const q=db.transaction('video-draft').objectStore('video-draft').getAll();q.onsuccess=()=>r(q.result);};});
+  const pad=n=>String(n).padStart(2,'0'),fmt=ts=>{const t=new Date(ts);return t.getFullYear()+'-'+pad(t.getMonth()+1)+'-'+pad(t.getDate())+' '+pad(t.getHours())+':'+pad(t.getMinutes())+':'+pad(t.getSeconds());};
+  const drawer=document.querySelector('.draft-drawer'),list=drawer.querySelector('.draft-list');
+  list.innerHTML=recs.map(r=>'<div class="draft-item"><div class="draft-info"><div class="draft-info-desc"><div class="draft-title-text has-title">'+r.content.draftStore.title+'</div><div class="draft-time">保存于'+fmt(r.timeStamp)+'</div></div><div class="draft-actions"><div class="btn"><span>编辑</span></div><div class="btn"><span>删除</span></div></div></div></div>').join('');
+  drawer.hidden=false;
+  list.querySelectorAll('.draft-item').forEach((it,i)=>{const [edit,del]=it.querySelectorAll('.btn');
+    edit.onclick=()=>{window.resumed=recs[i].draftId;drawer.hidden=true;document.querySelector('#progress').textContent='上传成功，重新上传';};
+    del.onclick=()=>{window.deleted=true;};});
+};
 </script></body></html>

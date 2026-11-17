@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { Page, delay } from './cdp';
 import type { Draft } from './draft';
 import * as scripts from './page-scripts';
@@ -8,8 +9,10 @@ export async function preparePage(page: Page, draft: Draft, progress: Progress, 
   progress(0.1, '请在打开的小红书窗口完成登录');
   await page.waitFor(scripts.uploadInputPresent, Math.min(timeout, 180_000), '尚未进入上传页面。请在小红书窗口完成登录，再点一次「上传并填写」');
   await page.click('.creator-tab, [role="tab"]', '上传视频');
-  progress(0.2, '正在上传视频，请保留小红书窗口');
-  await page.upload('input.upload-input, input[type="file"][accept*="video"]', draft.video);
+  if (!await resumeDraft(page, draft, progress, timeout)) {
+    progress(0.2, '正在上传视频，请保留小红书窗口');
+    await page.upload('input.upload-input, input[type="file"][accept*="video"]', draft.video);
+  }
   await page.waitFor(scripts.videoUploaded, timeout, '视频上传或处理超时，请在小红书窗口检查');
   progress(0.55, '正在填写标题、正文和话题');
   await page.fillTitle(draft.title);
@@ -70,4 +73,19 @@ async function insertTopic(page: Page, tag: string, timeout: number): Promise<'p
   await page.press('Escape');
   await page.type(' ', 0);
   return 'missing';
+}
+
+/**
+ * 同一个成片上次已经传过、没发布：小红书离开页面时会把它存成本机草稿，视频已经在小红书那边。
+ * 按视频文件大小认出那条草稿，从草稿箱点「编辑」接着填，不再重新上传。认不出、点不开就返回 false，照常上传。
+ */
+async function resumeDraft(page: Page, draft: Draft, progress: Progress, timeout: number): Promise<boolean> {
+  const found = await page.evaluate(scripts.findVideoDraft, fs.statSync(draft.video).size);
+  if (!found) return false;
+  progress(0.2, '找到这个成片上次留下的草稿，正在打开');
+  if (!await page.click('.draft-title, .draft-title-box')) return false;
+  try { await page.waitFor(scripts.draftDrawerOpen, Math.min(timeout, 10_000)); } catch { return false; }
+  if (await page.evaluate(scripts.editDraft, found)) return true;
+  await page.press('Escape');
+  return false;
 }

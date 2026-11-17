@@ -6910,14 +6910,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs4 = this.flowScalar(this.type);
+              const fs5 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs4, sep: [] });
+                map.items.push({ start, key: fs5, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs4);
+                this.stack.push(fs5);
               } else {
-                Object.assign(it, { key: fs4, sep: [] });
+                Object.assign(it, { key: fs5, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -7045,13 +7045,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs4 = this.flowScalar(this.type);
+              const fs5 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs4, sep: [] });
+                fc.items.push({ start: [], key: fs5, sep: [] });
               else if (it.sep)
-                this.stack.push(fs4);
+                this.stack.push(fs5);
               else
-                Object.assign(it, { key: fs4, sep: [] });
+                Object.assign(it, { key: fs5, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -7591,6 +7591,54 @@ function insertedTopics() {
   }
   return { count: nodes.length, last: last.replace(/^#/, "").trim() };
 }
+async function findVideoDraft(size) {
+  try {
+    const records = await new Promise((resolve) => {
+      const open = indexedDB.open("draft-database-v1");
+      open.onerror = () => resolve([]);
+      open.onupgradeneeded = () => {
+        open.transaction?.abort();
+        resolve([]);
+      };
+      open.onsuccess = () => {
+        const db = open.result;
+        if (![...db.objectStoreNames].includes("video-draft")) {
+          db.close();
+          resolve([]);
+          return;
+        }
+        const all = db.transaction("video-draft", "readonly").objectStore("video-draft").getAll();
+        all.onsuccess = () => {
+          db.close();
+          resolve(all.result);
+        };
+        all.onerror = () => {
+          db.close();
+          resolve([]);
+        };
+      };
+    });
+    const hit = records.filter((r) => r?.content?.draftStore?.video?.fsize === size && r?.content?.draftStore?.video?.fileid).sort((a, b) => (b.timeStamp ?? 0) - (a.timeStamp ?? 0))[0];
+    if (!hit) return null;
+    const t = new Date(hit.timeStamp), two = (n) => String(n).padStart(2, "0");
+    const time = `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())} ${two(t.getHours())}:${two(t.getMinutes())}:${two(t.getSeconds())}`;
+    return { title: String(hit.content.draftStore.title ?? ""), time };
+  } catch {
+    return null;
+  }
+}
+function draftDrawerOpen() {
+  return !![...document.querySelectorAll(".draft-drawer .draft-item, .draft-list .draft-item")].find((e) => e.getClientRects().length);
+}
+function editDraft({ title, time }) {
+  const items = [...document.querySelectorAll(".draft-drawer .draft-item, .draft-list .draft-item")].filter((e) => e.getClientRects().length);
+  const named = items.filter((e) => (e.querySelector(".draft-title-text")?.textContent ?? "").trim() === title);
+  const item = named.length === 1 ? named[0] : named.find((e) => (e.querySelector(".draft-time")?.textContent ?? "").includes(time));
+  const edit = item && [...item.querySelectorAll(".draft-actions .btn, .draft-actions *")].find((e) => (e.textContent ?? "").trim() === "\u7F16\u8F91");
+  if (!edit) return false;
+  edit.click();
+  return true;
+}
 function fillTitle(value) {
   const input = [...document.querySelectorAll('input[placeholder*="\u6807\u9898"], div.d-input input')].find((e) => e.getClientRects().length);
   if (!input) throw Error("\u627E\u4E0D\u5230\u6807\u9898\u8F93\u5165\u6846");
@@ -7856,13 +7904,16 @@ function pickCover(root, images) {
 }
 
 // src/prepare.ts
+var import_node_fs4 = __toESM(require("node:fs"), 1);
 async function preparePage(page, draft, progress, options = {}) {
   const timeout = options.timeout ?? 10 * 6e4;
   progress(0.1, "\u8BF7\u5728\u6253\u5F00\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3\u5B8C\u6210\u767B\u5F55");
   await page.waitFor(uploadInputPresent, Math.min(timeout, 18e4), "\u5C1A\u672A\u8FDB\u5165\u4E0A\u4F20\u9875\u9762\u3002\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u5B8C\u6210\u767B\u5F55\uFF0C\u518D\u70B9\u4E00\u6B21\u300C\u4E0A\u4F20\u5E76\u586B\u5199\u300D");
   await page.click('.creator-tab, [role="tab"]', "\u4E0A\u4F20\u89C6\u9891");
-  progress(0.2, "\u6B63\u5728\u4E0A\u4F20\u89C6\u9891\uFF0C\u8BF7\u4FDD\u7559\u5C0F\u7EA2\u4E66\u7A97\u53E3");
-  await page.upload('input.upload-input, input[type="file"][accept*="video"]', draft.video);
+  if (!await resumeDraft(page, draft, progress, timeout)) {
+    progress(0.2, "\u6B63\u5728\u4E0A\u4F20\u89C6\u9891\uFF0C\u8BF7\u4FDD\u7559\u5C0F\u7EA2\u4E66\u7A97\u53E3");
+    await page.upload('input.upload-input, input[type="file"][accept*="video"]', draft.video);
+  }
   await page.waitFor(videoUploaded, timeout, "\u89C6\u9891\u4E0A\u4F20\u6216\u5904\u7406\u8D85\u65F6\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
   progress(0.55, "\u6B63\u5728\u586B\u5199\u6807\u9898\u3001\u6B63\u6587\u548C\u8BDD\u9898");
   await page.fillTitle(draft.title);
@@ -7918,6 +7969,20 @@ async function insertTopic(page, tag, timeout) {
   await page.press("Escape");
   await page.type(" ", 0);
   return "missing";
+}
+async function resumeDraft(page, draft, progress, timeout) {
+  const found = await page.evaluate(findVideoDraft, import_node_fs4.default.statSync(draft.video).size);
+  if (!found) return false;
+  progress(0.2, "\u627E\u5230\u8FD9\u4E2A\u6210\u7247\u4E0A\u6B21\u7559\u4E0B\u7684\u8349\u7A3F\uFF0C\u6B63\u5728\u6253\u5F00");
+  if (!await page.click(".draft-title, .draft-title-box")) return false;
+  try {
+    await page.waitFor(draftDrawerOpen, Math.min(timeout, 1e4));
+  } catch {
+    return false;
+  }
+  if (await page.evaluate(editDraft, found)) return true;
+  await page.press("Escape");
+  return false;
 }
 
 // src/app.ts

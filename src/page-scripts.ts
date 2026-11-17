@@ -51,6 +51,44 @@ export function insertedTopics(): { count: number; last: string } {
   }
   return { count: nodes.length, last: last.replace(/^#/, '').trim() };
 }
+/**
+ * 小红书把视频笔记的草稿存在这个浏览器本地（IndexedDB `draft-database-v1` 的 `video-draft`），
+ * 每条记着已经传到小红书的视频（`content.draftStore.video.fsize` 是文件字节数）。找视频大小与这次成片相同、最新的那条，
+ * 返回它在草稿箱里显示的标题与保存时间（草稿箱只按这两样列出）；没有就返回 null。读不了也当没有。
+ */
+export async function findVideoDraft(size: number): Promise<{ title: string; time: string } | null> {
+  try {
+    const records = await new Promise<any[]>((resolve) => {
+      const open = indexedDB.open('draft-database-v1');
+      open.onerror = () => resolve([]);
+      open.onupgradeneeded = () => { open.transaction?.abort(); resolve([]); };
+      open.onsuccess = () => {
+        const db = open.result;
+        if (![...db.objectStoreNames].includes('video-draft')) { db.close(); resolve([]); return; }
+        const all = db.transaction('video-draft', 'readonly').objectStore('video-draft').getAll();
+        all.onsuccess = () => { db.close(); resolve(all.result); };
+        all.onerror = () => { db.close(); resolve([]); };
+      };
+    });
+    const hit = records
+      .filter(r => r?.content?.draftStore?.video?.fsize === size && r?.content?.draftStore?.video?.fileid)
+      .sort((a, b) => (b.timeStamp ?? 0) - (a.timeStamp ?? 0))[0];
+    if (!hit) return null;
+    const t = new Date(hit.timeStamp), two = (n: number) => String(n).padStart(2, '0');
+    const time = `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())} ${two(t.getHours())}:${two(t.getMinutes())}:${two(t.getSeconds())}`;
+    return { title: String(hit.content.draftStore.title ?? ''), time };
+  } catch { return null; }
+}
+export function draftDrawerOpen(): boolean { return !![...document.querySelectorAll<HTMLElement>('.draft-drawer .draft-item, .draft-list .draft-item')].find(e => e.getClientRects().length); }
+/** 在打开的草稿箱里点那条草稿的「编辑」：先按标题找，同名的再按「保存于」的时间分。 */
+export function editDraft({ title, time }: { title: string; time: string }): boolean {
+  const items = [...document.querySelectorAll<HTMLElement>('.draft-drawer .draft-item, .draft-list .draft-item')].filter(e => e.getClientRects().length);
+  const named = items.filter(e => (e.querySelector('.draft-title-text')?.textContent ?? '').trim() === title);
+  const item = named.length === 1 ? named[0] : named.find(e => (e.querySelector('.draft-time')?.textContent ?? '').includes(time));
+  const edit = item && [...item.querySelectorAll<HTMLElement>('.draft-actions .btn, .draft-actions *')].find(e => (e.textContent ?? '').trim() === '编辑');
+  if (!edit) return false;
+  edit.click(); return true;
+}
 export function fillTitle(value: string): void {
   const input = [...document.querySelectorAll<HTMLInputElement>('input[placeholder*="标题"], div.d-input input')].find(e => e.getClientRects().length);
   if (!input) throw Error('找不到标题输入框');

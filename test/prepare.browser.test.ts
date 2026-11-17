@@ -141,6 +141,43 @@ it('逐字输入话题、按话题名点中候选（不被浏览量和同前缀�
   expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toMatch(/^正文\n#科技\[话题\]# ?#AI\[话题\]# ?#冷门话题\s$/);
   expect(await page.evaluate(() => (window as any).submits)).toBe(0);
 });
+/** 往假页面的本机草稿库里放几条视频草稿（与小红书的 draft-database-v1 / video-draft 同形）。 */
+async function seedDrafts(page: Page, drafts: { id: string; title: string; size: number; at: number }[]) {
+  await page.evaluate(async (list: { id: string; title: string; size: number; at: number }[]) => {
+    await new Promise<void>((resolve, reject) => {
+      const open = indexedDB.open('draft-database-v1', 10);
+      open.onupgradeneeded = () => { for (const s of ['video-draft', 'image-draft']) open.result.createObjectStore(s, { keyPath: 'draftId' }); };
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const tx = open.result.transaction('video-draft', 'readwrite');
+        for (const d of list) tx.objectStore('video-draft').put({ draftId: d.id, timeStamp: d.at, uid: 'u', content: { draftStore: { title: d.title, video: { fileid: 'spectrum/' + d.id, fsize: d.size } } } });
+        tx.oncomplete = () => { open.result.close(); resolve(); };
+      };
+    });
+  }, drafts);
+}
+it('同一个成片上次传过没发布：从草稿箱打开那条草稿接着填，不再上传；成片换了就照常上传', async () => {
+  const { page } = await pageFor('resume-draft');
+  const video = path.join(root, 'video.mp4'), size = fs.statSync(video).size;
+  const base = Date.parse('2026-11-17T03:36:12Z');
+  await seedDrafts(page, [
+    { id: 'old', title: '同名标题', size, at: base - 3600_000 },
+    { id: 'mine', title: '同名标题', size, at: base },
+    { id: 'other-video', title: '别的片子', size: size + 1, at: base + 60_000 },
+  ]);
+  const draft = { title: '新标题', content: '新正文', tags: [], video, videoHash: '', cover: path.join(root, 'cover.png') };
+  await preparePage(page, draft, () => {}, { timeout: 2000 });
+  expect(await page.evaluate(() => (window as any).resumed)).toBe('mine');
+  expect(await page.evaluate(() => (window as any).uploads)).toEqual([]);
+  expect(await page.evaluate(() => (window as any).deleted)).toBeUndefined();
+  expect(await page.evaluate(() => (document.querySelector('input[placeholder]') as HTMLInputElement).value)).toBe('新标题');
+
+  const { page: fresh } = await pageFor('changed-video');
+  await seedDrafts(fresh, [{ id: 'stale', title: '旧成片', size: size + 1, at: base }]);
+  await preparePage(fresh, draft, () => {}, { timeout: 2000 });
+  expect(await fresh.evaluate(() => (window as any).resumed)).toBeUndefined();
+  expect(await fresh.evaluate(() => (window as any).uploads)).toEqual(['video.mp4']);
+});
 it('视频尚未处理完成或平台校验不通过时不能报告已准备好', async () => {
   const { page } = await pageFor('not-ready');
   await page.evaluate(() => { (document.querySelector('#publish') as HTMLButtonElement).disabled = true; });
