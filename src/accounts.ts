@@ -5,7 +5,8 @@ import { atomicJSON, childDirectory, readSmallJSON } from './files';
 
 /**
  * 一个已登录的小红书账号。名字与头像是登录后从小红书页面读到的，不让用户自己填；
- * user_id 用来认出同一个小红书账号重新登录了一次。登录状态在片场为它开的独立网页存储里（data_dir/web-sessions/<id>）。
+ * user_id 用来认出同一个小红书账号重新登录了一次。登录状态在片场为它开的独立网页存储里，由片场保管（在片场的应用数据目录下，
+ * 移除账号时经桥的 forget 清掉）；data_dir/web-sessions/<id> 是旧版放登录状态的地方，移除时顺手删掉。
  */
 export interface Account { id: string; name: string; created_at: string; user_id?: string; avatar?: string }
 const accountID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -64,7 +65,7 @@ export class AccountStore {
       return account;
     } finally { release(); }
   }
-  /** 删掉账号资料与它的登录状态（片场开的网页存储）。 */
+  /** 删掉账号资料，连同旧版留在 data_dir/web-sessions 下的网页存储（现在的登录状态由片场在 forget 时清掉）。 */
   removeFiles(id: string): void {
     if (!accountID.test(id)) throw Error('账号编号无效');
     fs.rmSync(path.join(this.root, id), { recursive: true, force: true });

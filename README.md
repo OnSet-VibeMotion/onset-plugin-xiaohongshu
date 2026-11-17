@@ -41,7 +41,7 @@ github:OnSet-VibeMotion/onset-plugin-xiaohongshu#main
 <插件私有 data_dir>/
   accounts/<账号编号>/account.json    # 昵称、头像与小红书用户编号
   accounts/<账号编号>/browser/        # 操作锁，兼容原有账号目录
-  web-sessions/<账号编号>/            # 客户端内独立登录空间，由片场管理
+  web-sessions/<账号编号>/            # 旧版的登录空间，移除账号时删掉；现在登录状态由片场存在它自己的应用数据目录里
 ```
 
 登录凭据不进入项目和 Git 仓库。项目内 `production/xiaohongshu/` 只有账号的昵称与头像、进度及准备状态。每次操作的网页控制连接由片场签发，操作结束后撤销；页面继续留给用户。不会读取日常浏览器的登录资料。由 0.2 升级时，以前填过备注的账号照常可用（显示备注、没有头像）；想换成昵称与头像，重新登录一次再移除旧的那条。

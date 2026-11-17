@@ -21,7 +21,7 @@ test('真实插件在片场内上传填写，返回项目后再打开仍保留�
   fs.writeFileSync(path.join(project.path, 'publish.md'), `---\n${stringify({ platform: 'xiaohongshu', publish_status: 'ready', video: { path: 'final.mp4' }, copy: { primary_title: '片场内自动填写', introduction: '在客户端里检查并发布', hashtags: [] }, cover: { images: [{ platform: 'xiaohongshu', ratio: '3:4', path: 'cover.png' }] } })}---\n`);
   await electronApp.evaluate(({ session }, { dir, html }) => {
     session.fromPath(dir).protocol.handle('https', () => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }));
-  }, { dir: path.join(data, 'web-sessions', account), html: fixture });
+  }, { dir: path.join(sandbox.userData, 'station-sessions', manifest.id, account), html: fixture });
   await openProject(page, project);
   const run = async op => {
     const started = await api(page, `/api/stations/${manifest.id}/ops/${op}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ params: { account } }) });
