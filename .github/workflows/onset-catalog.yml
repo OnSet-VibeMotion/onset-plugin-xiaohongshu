@@ -1,0 +1,17 @@
+# 推 v* tag 时自动向片场插件中心发「加一版」的 PR（OnSet-VibeMotion/onset-plugins 的 bump.yml）。
+# 发版前先把 onset-station.json 的 version 改成新版本号，tag 要打在那个提交上。
+# 需要仓库的 Actions Secret：ONSET_CATALOG_TOKEN（维护者自己的 GitHub token，要能 fork 与发 PR；
+# 这个账号要在插件中心这条登记的 maintainers 里）。
+name: Register in the plugin center
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  catalog:
+    uses: OnSet-VibeMotion/onset-plugins/.github/workflows/bump.yml@main
+    with:
+      id: xiaohongshu-upload
+    secrets:
+      token: ${{ secrets.ONSET_CATALOG_TOKEN }}
