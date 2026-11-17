@@ -141,6 +141,14 @@ it('逐字输入话题、按话题名点中候选（不被浏览量和同前缀�
   expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toMatch(/^正文\n#科技\[话题\]# ?#AI\[话题\]# ?#冷门话题\s$/);
   expect(await page.evaluate(() => (window as any).submits)).toBe(0);
 });
+it('片场客户端不放行键盘与鼠标事件（旧版）时不整个失败：退回插入文字，话题留成文字并提醒', async () => {
+  const { page } = await pageFor('old-client');
+  const raw = page.raw.bind(page);
+  (page as any).raw = (method: string, params?: Record<string, unknown>) => /^Input\.dispatch/.test(method) ? Promise.reject(Error('不支持这个网页控制命令')) : raw(method, params);
+  const warnings = await preparePage(page, { title: '标题', content: '正文', tags: ['科技'], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') }, () => {}, { timeout: 300 });
+  expect(warnings.join('\n')).toContain('科技');
+  expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toMatch(/正文\s#科技/);
+});
 /** 往假页面的本机草稿库里放几条视频草稿（与小红书的 draft-database-v1 / video-draft 同形）。 */
 async function seedDrafts(page: Page, drafts: { id: string; title: string; size: number; at: number }[]) {
   await page.evaluate(async (list: { id: string; title: string; size: number; at: number }[]) => {

@@ -100,20 +100,36 @@ export class Page {
   async click(selector: string, exactText?: string): Promise<boolean> {
     return this.evaluate(scripts.clickControl, { selector, exactText });
   }
-  /** 像人一样逐字打：小红书的话题候选靠逐字输入「#」触发。 */
+  /** 片场客户端放不放行键盘与鼠标事件（旧版只放行插入文字与页面脚本）；第一次被拒后记下，之后直接走退路。 */
+  private input = true;
+  private async trusted(method: string, params: Record<string, unknown>): Promise<boolean> {
+    if (!this.input) return false;
+    try { await this.raw(method, params); return true; }
+    catch (err) { if (/不支持这个网页控制命令/.test(String(err))) { this.input = false; return false; } throw err; }
+  }
+  /** 像人一样逐字打（按下、松开，带字符）：小红书的话题候选靠逐字输入「#」触发。客户端不让发键盘事件时退回插入文字。 */
   async type(text: string, gap = 50): Promise<void> {
-    for (const ch of text) { await this.raw('Input.insertText', { text: ch }); if (gap) await delay(gap); }
+    for (const ch of text) {
+      if (await this.trusted('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch, unmodifiedText: ch })) await this.raw('Input.dispatchKeyEvent', { type: 'keyUp', key: ch });
+      else await this.raw('Input.insertText', { text: ch });
+      if (gap) await delay(gap);
+    }
   }
-  async press(key: 'Enter' | 'Escape'): Promise<void> {
+  /** 按一个键；客户端不让发键盘事件时返回 false。 */
+  async press(key: 'Enter' | 'Escape'): Promise<boolean> {
     const code = key === 'Enter' ? 13 : 27;
-    await this.raw('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code, ...(key === 'Enter' ? { text: '\r' } : {}) });
+    if (!await this.trusted('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: code, ...(key === 'Enter' ? { text: '\r' } : {}) })) return false;
     await this.raw('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: code });
+    return true;
   }
-  /** 真的点一下鼠标（候选项可能只认鼠标事件，不认 element.click()）。 */
+  /** 真的点一下鼠标（候选项可能只认鼠标事件）；客户端不让发鼠标事件时，在那个位置的元素上依次派发按下、松开、点击。 */
   async clickAt(x: number, y: number): Promise<void> {
-    await this.raw('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
-    await this.raw('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-    await this.raw('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+    if (await this.trusted('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })) {
+      await this.raw('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+      await this.raw('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+      return;
+    }
+    await this.evaluate(scripts.pointerClick, { x, y });
   }
   async fillTitle(title: string): Promise<void> {
     await this.evaluate(scripts.fillTitle, title);

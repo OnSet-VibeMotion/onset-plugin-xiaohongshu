@@ -7639,6 +7639,18 @@ function editDraft({ title, time }) {
   edit.click();
   return true;
 }
+function pointerClick({ x, y }) {
+  const target = document.elementFromPoint(x, y);
+  if (!target) return false;
+  if (target.closest(".publish-page-publish-btn, xhs-publish-btn") || /^(发布|立即发布|定时发布|确认发布)$/.test(target.textContent?.trim() ?? "")) throw Error("\u63D2\u4EF6\u4E0D\u5141\u8BB8\u70B9\u51FB\u53D1\u5E03\u6309\u94AE");
+  const init = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0 };
+  target.dispatchEvent(new PointerEvent("pointerdown", init));
+  target.dispatchEvent(new MouseEvent("mousedown", init));
+  target.dispatchEvent(new PointerEvent("pointerup", init));
+  target.dispatchEvent(new MouseEvent("mouseup", init));
+  target.dispatchEvent(new MouseEvent("click", init));
+  return true;
+}
 function fillTitle(value) {
   const input = [...document.querySelectorAll('input[placeholder*="\u6807\u9898"], div.d-input input')].find((e) => e.getClientRects().length);
   if (!input) throw Error("\u627E\u4E0D\u5230\u6807\u9898\u8F93\u5165\u6846");
@@ -7750,23 +7762,44 @@ var Page = class _Page {
   async click(selector, exactText) {
     return this.evaluate(clickControl, { selector, exactText });
   }
-  /** 像人一样逐字打：小红书的话题候选靠逐字输入「#」触发。 */
+  /** 片场客户端放不放行键盘与鼠标事件（旧版只放行插入文字与页面脚本）；第一次被拒后记下，之后直接走退路。 */
+  input = true;
+  async trusted(method, params) {
+    if (!this.input) return false;
+    try {
+      await this.raw(method, params);
+      return true;
+    } catch (err) {
+      if (/不支持这个网页控制命令/.test(String(err))) {
+        this.input = false;
+        return false;
+      }
+      throw err;
+    }
+  }
+  /** 像人一样逐字打（按下、松开，带字符）：小红书的话题候选靠逐字输入「#」触发。客户端不让发键盘事件时退回插入文字。 */
   async type(text2, gap = 50) {
     for (const ch of text2) {
-      await this.raw("Input.insertText", { text: ch });
+      if (await this.trusted("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch, unmodifiedText: ch })) await this.raw("Input.dispatchKeyEvent", { type: "keyUp", key: ch });
+      else await this.raw("Input.insertText", { text: ch });
       if (gap) await delay(gap);
     }
   }
+  /** 按一个键；客户端不让发键盘事件时返回 false。 */
   async press(key) {
     const code = key === "Enter" ? 13 : 27;
-    await this.raw("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: code, ...key === "Enter" ? { text: "\r" } : {} });
+    if (!await this.trusted("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: code, ...key === "Enter" ? { text: "\r" } : {} })) return false;
     await this.raw("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: code });
+    return true;
   }
-  /** 真的点一下鼠标（候选项可能只认鼠标事件，不认 element.click()）。 */
+  /** 真的点一下鼠标（候选项可能只认鼠标事件）；客户端不让发鼠标事件时，在那个位置的元素上依次派发按下、松开、点击。 */
   async clickAt(x, y) {
-    await this.raw("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-    await this.raw("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
-    await this.raw("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+    if (await this.trusted("Input.dispatchMouseEvent", { type: "mouseMoved", x, y })) {
+      await this.raw("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+      await this.raw("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+      return;
+    }
+    await this.evaluate(pointerClick, { x, y });
   }
   async fillTitle(title) {
     await this.evaluate(fillTitle, title);
@@ -7920,7 +7953,7 @@ async function preparePage(page, draft, progress, options = {}) {
   await page.fillContent(draft.content);
   const warnings = [];
   if (draft.tags.length) {
-    await page.press("Enter");
+    if (!await page.press("Enter")) await page.type(" ", 0);
     for (const tag of draft.tags) {
       const outcome = await insertTopic(page, tag, timeout);
       if (outcome === "picked") continue;

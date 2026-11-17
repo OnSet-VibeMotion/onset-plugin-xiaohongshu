@@ -89,6 +89,17 @@ export function editDraft({ title, time }: { title: string; time: string }): boo
   if (!edit) return false;
   edit.click(); return true;
 }
+/** 没有可信鼠标事件时的退路：在 (x, y) 处的元素上派发 pointerdown / mousedown / pointerup / mouseup / click。不点发布。 */
+export function pointerClick({ x, y }: { x: number; y: number }): boolean {
+  const target = document.elementFromPoint(x, y) as HTMLElement | null;
+  if (!target) return false;
+  if (target.closest('.publish-page-publish-btn, xhs-publish-btn') || /^(发布|立即发布|定时发布|确认发布)$/.test(target.textContent?.trim() ?? '')) throw Error('插件不允许点击发布按钮');
+  const init = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0 };
+  target.dispatchEvent(new PointerEvent('pointerdown', init)); target.dispatchEvent(new MouseEvent('mousedown', init));
+  target.dispatchEvent(new PointerEvent('pointerup', init)); target.dispatchEvent(new MouseEvent('mouseup', init));
+  target.dispatchEvent(new MouseEvent('click', init));
+  return true;
+}
 export function fillTitle(value: string): void {
   const input = [...document.querySelectorAll<HTMLInputElement>('input[placeholder*="标题"], div.d-input input')].find(e => e.getClientRects().length);
   if (!input) throw Error('找不到标题输入框');

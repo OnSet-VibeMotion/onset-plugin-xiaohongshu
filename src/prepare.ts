@@ -20,7 +20,7 @@ export async function preparePage(page: Page, draft: Draft, progress: Progress, 
   const warnings: string[] = [];
   if (draft.tags.length) {
     // 话题另起一段，免得粘在正文最后一句上。
-    await page.press('Enter');
+    if (!await page.press('Enter')) await page.type(' ', 0);
     for (const tag of draft.tags) {
       const outcome = await insertTopic(page, tag, timeout);
       if (outcome === 'picked') continue;
