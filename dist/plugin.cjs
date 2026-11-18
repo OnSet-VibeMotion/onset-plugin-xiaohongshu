@@ -7560,6 +7560,31 @@ function coverConfirmReady() {
 function coverDialogClosed() {
   return [...document.querySelectorAll('.d-modal, [role="dialog"]')].every((e) => !e.getClientRects().length);
 }
+function coverEntryPresent() {
+  return !!document.querySelector(".cover-edit-entry, div.upload-cover, button.upload-cover");
+}
+function coverEditorOpen() {
+  const m = document.querySelector(".main-cover-editor-modal");
+  return !!m && m.getClientRects().length > 0;
+}
+function clearUploadedCover() {
+  const clear = document.querySelector('.main-cover-editor-modal [aria-label="\u6E05\u9664\u5DF2\u4E0A\u4F20\u5C01\u9762"]');
+  if (!clear) return false;
+  clear.click();
+  return true;
+}
+function coverInputReady() {
+  return !!document.querySelector('.main-cover-editor-modal input[type="file"][accept*="image"]');
+}
+function coverUploaded() {
+  return !!document.querySelector(".main-cover-editor-modal .uploaded-thumbnail");
+}
+function clickCoverDone() {
+  const button = [...document.querySelectorAll(".main-cover-editor-modal button")].find((b) => b.textContent?.trim() === "\u5B8C\u6210" && !b.disabled && b.getClientRects().length);
+  if (!button) return false;
+  button.click();
+  return true;
+}
 function clickControl({ selector, exactText }) {
   const matches = [...document.querySelectorAll(selector)].filter((e) => e.getClientRects().length && (!exactText || e.textContent?.trim() === exactText));
   const element = matches.find((e) => !matches.some((other) => other !== e && e.contains(other)));
@@ -7950,19 +7975,24 @@ ${attribution}`;
   for await (const chunk of import_node_fs3.default.createReadStream(videoPath)) hash.update(chunk);
   const videoHash = hash.digest("hex");
   if (video.sha256 && video.sha256 !== videoHash) throw Error("\u6210\u7247\u5DF2\u53D8\u52A8\uFF0C\u8BF7\u5148\u5237\u65B0\u53D1\u5E03\u4FE1\u606F");
-  const coverPath = pickCover(root, cover.images);
+  const coverPath = pickCover(root, cover.images, landscape(video));
   return { title, content, tags: normalizedTags, video: videoPath, videoHash, cover: coverPath };
 }
-function pickCover(root, images) {
+function landscape(video) {
+  const w = Number(video.width_px), h = Number(video.height_px);
+  return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 && w > h;
+}
+function pickCover(root, images, wide) {
   if (images === void 0) return "";
   if (!Array.isArray(images)) throw Error("\u5C01\u9762\u767B\u8BB0\u683C\u5F0F\u4E0D\u6B63\u786E");
   const all = images.map(record);
   const own = all.filter((c) => c.platform === "xiaohongshu");
-  const tiers = [own.filter((c) => c.ratio === "3:4"), own, all.filter((c) => c.ratio === "3:4"), all];
+  const ratio = wide ? "4:3" : "3:4";
+  const tiers = wide ? [own.filter((c) => c.ratio === ratio), all.filter((c) => c.ratio === ratio), own, all] : [own.filter((c) => c.ratio === ratio), own, all.filter((c) => c.ratio === ratio), all];
   for (const tier of tiers) {
     const paths = [...new Set(tier.map((c) => text(c.path, "\u5C01\u9762\u8DEF\u5F84")))];
     if (paths.length === 0) continue;
-    if (paths.length > 1) throw Error("\u6709\u51E0\u5F20\u5019\u9009\u5C01\u9762\uFF0C\u5206\u4E0D\u6E05\u7528\u54EA\u5F20\uFF1A\u8BF7\u5728\u7247\u573A\u7ED9\u5C0F\u7EA2\u4E66\u767B\u8BB0\u4E00\u5F20 3:4 \u5C01\u9762");
+    if (paths.length > 1) throw Error(`\u6709\u51E0\u5F20\u5019\u9009\u5C01\u9762\uFF0C\u5206\u4E0D\u6E05\u7528\u54EA\u5F20\uFF1A\u8BF7\u5728\u7247\u573A\u7ED9\u5C0F\u7EA2\u4E66\u767B\u8BB0\u4E00\u5F20 ${ratio} \u5C01\u9762`);
     const file = projectFile(root, paths[0]);
     if (![".png", ".jpg", ".jpeg", ".webp"].includes(import_node_path3.default.extname(file).toLowerCase()) || import_node_fs3.default.statSync(file).size === 0) throw Error("\u5C01\u9762\u9700\u8981\u975E\u7A7A\u7684 PNG\u3001JPEG \u6216 WebP \u56FE\u7247");
     return file;
@@ -7999,19 +8029,35 @@ async function preparePage(page, draft, progress, options = {}) {
     warnings.push("\u53D1\u5E03\u4FE1\u606F\u91CC\u6CA1\u6709\u767B\u8BB0\u5C01\u9762\uFF0C\u5C0F\u7EA2\u4E66\u4F1A\u7528\u89C6\u9891\u9996\u5E27\uFF1B\u9700\u8981\u7684\u8BDD\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762\u3002");
   } else {
     progress(0.75, "\u6B63\u5728\u8BBE\u7F6E\u5C01\u9762");
-    if (!await page.click("div.upload-cover, button.upload-cover, .cover-plugin-preview .default.pointer") && !await page.click("button", "\u8BBE\u7F6E\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u8BBE\u7F6E\u5C01\u9762\u7684\u5165\u53E3\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
-    await page.waitFor(coverDialogOpen, Math.min(timeout, 15e3), "\u5C01\u9762\u7A97\u53E3\u6CA1\u6709\u6253\u5F00");
-    if (!await page.click('.d-modal *, [role="dialog"] *', "\u4E0A\u4F20\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u300C\u4E0A\u4F20\u5C01\u9762\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
-    await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', draft.cover);
-    await delay(Math.min(timeout, 1e3));
-    await page.waitFor(coverConfirmReady, Math.min(timeout, 15e3), "\u5C01\u9762\u5C1A\u672A\u5904\u7406\u5B8C\u6210");
-    if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', "\u786E\u5B9A")) throw Error("\u5C01\u9762\u6CA1\u6709\u786E\u8BA4\u6210\u529F");
-    await page.waitFor(coverDialogClosed, Math.min(timeout, 15e3), "\u5C01\u9762\u5C1A\u672A\u4FDD\u5B58\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
+    await setCover(page, draft.cover, timeout);
   }
   warnings.push(...await removeExtraTopics(page, draft.tags));
   await page.waitFor(publishReady, Math.min(timeout, 18e4), "\u5185\u5BB9\u5DF2\u586B\u5199\uFF0C\u4F46\u5C0F\u7EA2\u4E66\u5C1A\u672A\u5141\u8BB8\u53D1\u5E03\uFF0C\u8BF7\u5728\u7A97\u53E3\u68C0\u67E5\u4E0A\u4F20\u8FDB\u5EA6\u6216\u6821\u9A8C\u63D0\u793A");
   progress(1, "\u5185\u5BB9\u5DF2\u586B\u597D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5\u5E76\u624B\u52A8\u53D1\u5E03");
   return warnings;
+}
+async function setCover(page, cover, timeout) {
+  const step = Math.min(timeout, 15e3);
+  await page.waitFor(coverEntryPresent, step, "\u627E\u4E0D\u5230\u8BBE\u7F6E\u5C01\u9762\u7684\u5165\u53E3\uFF08\u300C\u7F16\u8F91\u5C01\u9762\u300D\uFF09\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  if (!await page.click(".cover-edit-entry")) return legacyCover(page, cover, timeout);
+  await page.waitFor(coverEditorOpen, step, "\u5C01\u9762\u7F16\u8F91\u5668\u6CA1\u6709\u6253\u5F00\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  if (await page.evaluate(clearUploadedCover)) await page.waitFor(coverInputReady, step, "\u6E05\u4E0D\u6389\u7F16\u8F91\u5668\u91CC\u539F\u6765\u90A3\u5F20\u5C01\u9762\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  await page.waitFor(coverInputReady, step, "\u5C01\u9762\u7F16\u8F91\u5668\u91CC\u627E\u4E0D\u5230\u300C\u4E0A\u4F20\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  await page.upload('.main-cover-editor-modal input[type="file"][accept*="image"]', cover);
+  await page.waitFor(coverUploaded, step, "\u5C01\u9762\u56FE\u7247\u6CA1\u6709\u4F20\u4E0A\u53BB\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5");
+  if (!await page.evaluate(clickCoverDone)) throw Error("\u5C01\u9762\u7F16\u8F91\u5668\u91CC\u627E\u4E0D\u5230\u300C\u5B8C\u6210\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5\u5C01\u9762");
+  await page.waitFor(() => !document.querySelector(".main-cover-editor-modal")?.getClientRects().length, step, "\u5C01\u9762\u8FD8\u6CA1\u4FDD\u5B58\uFF08\u7F16\u8F91\u5668\u6CA1\u6709\u5173\u4E0A\uFF09\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
+}
+async function legacyCover(page, cover, timeout) {
+  const step = Math.min(timeout, 15e3);
+  if (!await page.click("div.upload-cover, button.upload-cover") && !await page.click("button", "\u8BBE\u7F6E\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u8BBE\u7F6E\u5C01\u9762\u7684\u5165\u53E3\uFF08\u300C\u7F16\u8F91\u5C01\u9762\u300D\uFF09\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  await page.waitFor(coverDialogOpen, step, "\u5C01\u9762\u7A97\u53E3\u6CA1\u6709\u6253\u5F00");
+  if (!await page.click('.d-modal *, [role="dialog"] *', "\u4E0A\u4F20\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u300C\u4E0A\u4F20\u5C01\u9762\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', cover);
+  await delay(Math.min(timeout, 1e3));
+  await page.waitFor(coverConfirmReady, step, "\u5C01\u9762\u5C1A\u672A\u5904\u7406\u5B8C\u6210");
+  if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', "\u786E\u5B9A")) throw Error("\u5C01\u9762\u6CA1\u6709\u786E\u8BA4\u6210\u529F");
+  await page.waitFor(coverDialogClosed, step, "\u5C01\u9762\u5C1A\u672A\u4FDD\u5B58\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
 }
 async function insertTopic(page, tag, timeout) {
   const same = (names) => names.filter((n) => n.toLowerCase() === tag.toLowerCase()).length;

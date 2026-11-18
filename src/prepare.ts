@@ -32,21 +32,44 @@ export async function preparePage(page: Page, draft: Draft, progress: Progress, 
     warnings.push('发布信息里没有登记封面，小红书会用视频首帧；需要的话请在小红书页面手动设置封面。');
   } else {
     progress(0.75, '正在设置封面');
-    if (!await page.click('div.upload-cover, button.upload-cover, .cover-plugin-preview .default.pointer')
-      && !await page.click('button', '设置封面')) throw Error('找不到设置封面的入口，请在小红书页面手动设置封面');
-    await page.waitFor(scripts.coverDialogOpen, Math.min(timeout, 15_000), '封面窗口没有打开');
-    if (!await page.click('.d-modal *, [role="dialog"] *', '上传封面')) throw Error('找不到「上传封面」，请在小红书页面手动设置封面');
-    await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', draft.cover);
-    await delay(Math.min(timeout, 1000));
-    await page.waitFor(scripts.coverConfirmReady, Math.min(timeout, 15_000), '封面尚未处理完成');
-    if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', '确定')) throw Error('封面没有确认成功');
-    await page.waitFor(scripts.coverDialogClosed, Math.min(timeout, 15_000), '封面尚未保存，请在小红书窗口检查');
+    await setCover(page, draft.cover, timeout);
   }
   warnings.push(...await removeExtraTopics(page, draft.tags));
   // Readiness only: do not click. Upload progress can coexist with an editable form.
   await page.waitFor(scripts.publishReady, Math.min(timeout, 180_000), '内容已填写，但小红书尚未允许发布，请在窗口检查上传进度或校验提示');
   progress(1, '内容已填好，请在小红书页面检查并手动发布');
   return warnings;
+}
+
+/**
+ * 设置封面。新版页面（2026-11-18 在真实页面上核对过）：「编辑封面」→ 编辑器里把图片放进上传框
+ * （已经有一张传上去的就先清掉）→ 等缩略图出来 →「完成」。图片直接放进页面里的文件框，不弹选文件窗口。
+ * 旧版页面（.upload-cover →「上传封面」→「确定」）照旧支持。
+ */
+async function setCover(page: Page, cover: string, timeout: number): Promise<void> {
+  const step = Math.min(timeout, 15_000);
+  await page.waitFor(scripts.coverEntryPresent, step, '找不到设置封面的入口（「编辑封面」），请在小红书页面手动设置封面');
+  if (!await page.click('.cover-edit-entry')) return legacyCover(page, cover, timeout);
+  await page.waitFor(scripts.coverEditorOpen, step, '封面编辑器没有打开，请在小红书页面手动设置封面');
+  if (await page.evaluate(scripts.clearUploadedCover)) await page.waitFor(scripts.coverInputReady, step, '清不掉编辑器里原来那张封面，请在小红书页面手动设置封面');
+  await page.waitFor(scripts.coverInputReady, step, '封面编辑器里找不到「上传」，请在小红书页面手动设置封面');
+  await page.upload('.main-cover-editor-modal input[type="file"][accept*="image"]', cover);
+  await page.waitFor(scripts.coverUploaded, step, '封面图片没有传上去，请在小红书页面检查');
+  if (!await page.evaluate(scripts.clickCoverDone)) throw Error('封面编辑器里找不到「完成」，请在小红书页面检查封面');
+  await page.waitFor(() => !document.querySelector('.main-cover-editor-modal')?.getClientRects().length, step, '封面还没保存（编辑器没有关上），请在小红书窗口检查');
+}
+
+/** 旧版页面：弹窗里点「上传封面」，放进图片，点「确定」。 */
+async function legacyCover(page: Page, cover: string, timeout: number): Promise<void> {
+  const step = Math.min(timeout, 15_000);
+  if (!await page.click('div.upload-cover, button.upload-cover') && !await page.click('button', '设置封面')) throw Error('找不到设置封面的入口（「编辑封面」），请在小红书页面手动设置封面');
+  await page.waitFor(scripts.coverDialogOpen, step, '封面窗口没有打开');
+  if (!await page.click('.d-modal *, [role="dialog"] *', '上传封面')) throw Error('找不到「上传封面」，请在小红书页面手动设置封面');
+  await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', cover);
+  await delay(Math.min(timeout, 1000));
+  await page.waitFor(scripts.coverConfirmReady, step, '封面尚未处理完成');
+  if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', '确定')) throw Error('封面没有确认成功');
+  await page.waitFor(scripts.coverDialogClosed, step, '封面尚未保存，请在小红书窗口检查');
 }
 
 /**

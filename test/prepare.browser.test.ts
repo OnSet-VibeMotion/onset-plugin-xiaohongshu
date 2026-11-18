@@ -77,7 +77,7 @@ it('上传并填写后保持浏览器打开，永远不提交', async () => {
   expect(await page.evaluate(() => ({ title: (document.querySelector('input[placeholder]') as HTMLInputElement).value,
     body: (document.querySelector('[contenteditable]') as HTMLElement).innerText,
     submits: (window as any).submits,
-    cover: (document.querySelector('input[accept="image/*"]') as HTMLInputElement).files?.[0]?.name,
+    cover: (window as any).coverSaved,
   }))).toEqual({ title: '我的视频', body: '中文正文\n第二段', submits: 0, cover: 'cover.png' });
   await page.evaluate(() => { document.cookie = 'account=a; path=/'; });
   browser.disconnect();
@@ -121,13 +121,34 @@ it('未匹配的话题保留文字并明确提醒用户，封面失败不能算�
   expect(warnings[0]).toContain('冷门话题');
   expect(await page.evaluate(() => (document.querySelector('[contenteditable]') as HTMLElement).innerText)).toContain('#冷门话题');
   expect(await page.evaluate(() => document.querySelectorAll('a[data-topic]').length)).toBe(0);
-  await page.evaluate(() => document.querySelector('.upload-cover')?.remove());
+  await page.evaluate(() => document.querySelector('.cover-plugin-preview')?.remove());
   await expect(preparePage(page, { ...draft, tags: [] }, () => {}, { timeout: 100 })).rejects.toThrow('封面');
   // 没有登记封面：不去点设置封面（入口已经没了也不报错），提醒一句。
   const noCover = await preparePage(page, { ...draft, tags: [], cover: '' }, () => {}, { timeout: 100 }).catch((err: Error) => err);
   expect(noCover instanceof Error ? noCover.message : '').not.toContain('封面');
 
   expect(await page.evaluate(() => (window as any).submits)).toBe(0);
+});
+it('编辑器里已经有一张传上去的封面（接着草稿做）：先清掉，再放进这次的封面', async () => {
+  const { page } = await pageFor('cover-existing');
+  await page.evaluate(() => { (window as any).existingCover = 'old.png'; });
+  await preparePage(page, { title: '标题', content: '正文', tags: [], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') }, () => {}, { timeout: 3000 });
+  expect(await page.evaluate(() => ({ saved: (window as any).coverSaved, cleared: (window as any).cleared, uploads: (window as any).coverUploads, open: !(document.querySelector('.d-modal-mask') as HTMLElement).hidden })))
+    .toEqual({ saved: 'cover.png', cleared: 1, uploads: 1, open: false });
+});
+it('旧版页面（「设置封面」按钮 →「上传封面」→「确定」）照旧能设封面', async () => {
+  const { page } = await pageFor('cover-legacy');
+  expect(await page.evaluate(scripts.coverEditorOpen)).toBe(false);
+  await page.evaluate(() => {
+    document.querySelector('.cover-plugin-preview')?.remove();
+    const old = document.createElement('div');
+    old.innerHTML = '<button class="upload-cover">设置封面</button><div class="d-modal" hidden><button>上传封面</button><div class="upload-wrapper"><input type="file" accept="image/*"></div><div class="d-modal-footer"><button id="confirm">确定</button></div></div>';
+    document.body.append(old);
+    old.querySelector<HTMLElement>('.upload-cover')!.onclick = () => { old.querySelector<HTMLElement>('.d-modal')!.hidden = false; };
+    old.querySelector<HTMLElement>('#confirm')!.onclick = () => { old.querySelector<HTMLElement>('.d-modal')!.hidden = true; };
+  });
+  await preparePage(page, { title: '标题', content: '正文', tags: [], video: path.join(root, 'video.mp4'), videoHash: '', cover: path.join(root, 'cover.png') }, () => {}, { timeout: 3000 });
+  expect(await page.evaluate(() => (document.querySelector('.d-modal input[type="file"]') as HTMLInputElement).files?.[0]?.name)).toBe('cover.png');
 });
 it('逐字输入话题、按话题名点中候选（不被浏览量和同前缀的话题干扰），确认封面不触及其他确认弹窗', async () => {
   const { page } = await pageFor('topic-selected');

@@ -5,14 +5,21 @@
 <input type="file" class="upload-input" accept="video/*">
 <p id="progress">请上传视频</p>
 <input placeholder="填写标题"><div contenteditable="true" class="tiptap ProseMirror" style="min-height:60px"></div>
-<button class="upload-cover">设置封面</button>
-<div class="d-modal" hidden><button>上传封面</button><div class="upload-wrapper"><input type="file" accept="image/*"></div><div class="d-modal-footer"><button id="confirm">确定</button></div></div>
+<!-- 新版封面（照 2026-11-18 的真实页面）：「编辑封面」打开 .main-cover-editor-modal，上传框传完图就换成缩略图（带「清除已上传封面」），「完成」关上。 -->
+<div class="cover-plugin-preview"><div class="cover-plugin-title"><span>设置封面</span></div><div class="cover"><div class="default row"><div class="operator"><div class="cover-edit-stack"><div class="cover-edit-entry"><span class="cover-edit-entry-text">编辑封面</span><span class="cover-edit-help"><svg width="12" height="12"></svg></span></div></div></div></div></div></div>
+<div class="d-modal-mask" style="position:fixed;inset:0" hidden><div class="d-modal d-modal-no-footer cover-modal main-cover-editor-modal"><div class="d-modal-header"><h6>设置封面</h6></div><div class="d-modal-content"><div class="editor-panel"><div class="cover-choose-container"><ul id="images-ul"><li class="item">帧</li></ul><div class="upload-slot"></div></div><div class="bottom"><button class="d-button custom-button bg-red mojito-button"><span>完成</span></button></div></div></div></div><img class="close-icon" alt=""></div>
 <div class="publish-page-publish-btn"><button id="publish">发布</button></div>
 <script>
 window.submits=0; window.uploads=[];
 document.querySelector('.upload-input').onchange=e=>{uploads.push(e.target.files[0].name);document.querySelector('#progress').textContent='上传成功，重新上传';};
-document.querySelector('.upload-cover').onclick=()=>document.querySelector('.d-modal').hidden=false;
-document.querySelector('#confirm').onclick=()=>{document.querySelector('.d-modal').hidden=true;document.querySelector('.upload-cover').textContent='编辑封面';};
+// window.existingCover：编辑器里已经有一张传上去的封面（接着草稿做时那样）。
+const mask=document.querySelector('.d-modal-mask'), slot=mask.querySelector('.upload-slot');
+function emptySlot(){slot.innerHTML='<label class="upload-btn"><input class="upload-input" accept="image/png, image/jpeg, image/*" type="file" aria-label="上传封面图片"><span class="upload-label">上传</span></label>';
+  slot.querySelector('input').onchange=e=>{window.coverFile=e.target.files[0].name;window.coverUploads=(window.coverUploads||0)+1;filledSlot();};}
+function filledSlot(){slot.innerHTML='<button type="button" class="uploaded-thumbnail"><img alt=""><span class="uploaded-thumbnail-clear" role="button" aria-label="清除已上传封面"></span></button>';
+  slot.querySelector('.uploaded-thumbnail-clear').onclick=()=>{window.coverFile='';window.cleared=(window.cleared||0)+1;emptySlot();};}
+document.querySelector('.cover-edit-entry').onclick=()=>{if(window.existingCover){window.coverFile=window.existingCover;filledSlot();window.existingCover='';}else if(!slot.innerHTML)emptySlot();mask.hidden=false;};
+mask.querySelector('.mojito-button').onclick=()=>{mask.hidden=true;window.coverSaved=window.coverFile||'';};
 document.querySelector('#publish').onclick=()=>submits++;
 
 // 仿小红书的话题候选：正文末尾是「#xx」时弹出同前缀的话题（每项有 .name 与浏览量），只认真实的鼠标点击，

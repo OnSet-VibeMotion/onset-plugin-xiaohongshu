@@ -38,7 +38,7 @@ test('真实插件在片场内上传填写，返回项目后再打开仍保留�
   expect((await run('prepare')).status).toBe('ready_to_publish');
   const content = await electronApp.evaluate(async ({ webContents }) => {
     const wc = webContents.getAllWebContents().find(w => w.getURL().startsWith('https://creator.xiaohongshu.com/'));
-    const result = await wc.executeJavaScript(`({ title: document.querySelector('input[placeholder]').value, body: document.querySelector('[contenteditable]').innerText, video: document.querySelector('input[accept="video/*"]').files[0].name, cover: document.querySelector('input[accept="image/*"]').files[0].name, submits: window.submits })`);
+    const result = await wc.executeJavaScript(`({ title: document.querySelector('input[placeholder]').value, body: document.querySelector('[contenteditable]').innerText, video: document.querySelector('input[accept="video/*"]').files[0].name, cover: window.coverSaved, submits: window.submits })`);
     await wc.executeJavaScript(`document.querySelector('input[placeholder]').value='用户改过的标题'`);
     const bar = webContents.getAllWebContents().find(w => w.getURL().startsWith('data:text/html'));
     await bar.executeJavaScript(`document.querySelector('a').click()`);

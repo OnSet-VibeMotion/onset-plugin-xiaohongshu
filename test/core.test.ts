@@ -133,6 +133,25 @@ describe('发布素材', () => {
     expect(shared.tags).toEqual(['通用']);
     await expect(readDraft(project({ copy: { primary_title: '标题', introduction: '正文', platform_hashtags: { xiaohongshu: '小红书活动' } } }))).rejects.toThrow('copy.platform_hashtags.xiaohongshu');
   });
+  it('横屏成片用 4:3 封面（与抖音的横版是同一张），比例比平台要紧；竖屏照旧用 3:4', async () => {
+    const pick = async (video: Record<string, unknown>, images: unknown[]) => {
+      const root = project({ video: { path: 'final.mp4', ...video }, cover: { images } });
+      for (const name of ['a.png', 'b.png', 'c.png']) fs.writeFileSync(path.join(root, name), 'image');
+      return path.basename((await readDraft(root)).cover);
+    };
+    const wide = { width_px: 1920, height_px: 1080 };
+    const registered = [
+      { platform: 'xiaohongshu', ratio: '3:4', path: 'a.png' },
+      { platform: 'douyin', ratio: '4:3', path: 'b.png' },
+      { platform: 'douyin', ratio: '3:4', path: 'c.png' },
+    ];
+    expect(await pick(wide, registered)).toBe('b.png');
+    expect(await pick(wide, [...registered, { platform: 'xiaohongshu', ratio: '4:3', path: 'c.png' }])).toBe('c.png');
+    expect(await pick(wide, [{ platform: 'xiaohongshu', ratio: '3:4', path: 'a.png' }])).toBe('a.png');
+    expect(await pick({ width_px: 1080, height_px: 1920 }, registered)).toBe('a.png');
+    expect(await pick({}, registered)).toBe('a.png');
+    await expect(pick(wide, [{ platform: 'douyin', ratio: '4:3', path: 'a.png' }, { platform: 'bilibili', ratio: '4:3', path: 'b.png' }])).rejects.toThrow('4:3');
+  });
   it('不截断标题，不悄悄忽略多张候选封面', async () => {
     await expect(readDraft(project({ copy: { primary_title: '长'.repeat(21), introduction: '正文' } }))).rejects.toThrow('标题');
     await expect(readDraft(project({ cover: { images: [

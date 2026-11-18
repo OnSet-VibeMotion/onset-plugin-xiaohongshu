@@ -56,24 +56,36 @@ export async function readDraft(root: string): Promise<Draft> {
   for await (const chunk of fs.createReadStream(videoPath)) hash.update(chunk);
   const videoHash = hash.digest('hex');
   if (video.sha256 && video.sha256 !== videoHash) throw Error('成片已变动，请先刷新发布信息');
-  const coverPath = pickCover(root, cover.images);
+  const coverPath = pickCover(root, cover.images, landscape(video));
   return { title, content, tags: normalizedTags, video: videoPath, videoHash, cover: coverPath };
 }
 
+/** 成片是横屏吗：看 publish.md 的 video.width_px / height_px，没写就当竖屏（小红书原来的做法）。 */
+function landscape(video: Record<string, unknown>): boolean {
+  const w = Number(video.width_px), h = Number(video.height_px);
+  return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 && w > h;
+}
+
 /**
- * 挑一张封面：小红书 3:4 → 小红书其他比例 → 任何平台的 3:4（小红书推荐竖版）→ 任何一张。
+ * 挑一张封面。小红书的封面跟着成片的方向：横屏成片用 4:3（与抖音的横版封面是同一张），竖屏用 3:4。
+ * - 横屏：小红书的 4:3 → 任何平台的 4:3 → 小红书其他比例 → 任何一张。比例比平台要紧：
+ *   给小红书登记了 3:4、给抖音登记了 4:3 时，用的是 4:3 那张。
+ * - 竖屏：小红书的 3:4 → 小红书其他比例 → 任何平台的 3:4 → 任何一张。
  * 同一档里有几张不同的图时报错，不悄悄挑一张。一张都没有时返回空，不设置封面。
  */
-function pickCover(root: string, images: unknown): string {
+function pickCover(root: string, images: unknown, wide: boolean): string {
   if (images === undefined) return '';
   if (!Array.isArray(images)) throw Error('封面登记格式不正确');
   const all = images.map(record);
   const own = all.filter(c => c.platform === 'xiaohongshu');
-  const tiers = [own.filter(c => c.ratio === '3:4'), own, all.filter(c => c.ratio === '3:4'), all];
+  const ratio = wide ? '4:3' : '3:4';
+  const tiers = wide
+    ? [own.filter(c => c.ratio === ratio), all.filter(c => c.ratio === ratio), own, all]
+    : [own.filter(c => c.ratio === ratio), own, all.filter(c => c.ratio === ratio), all];
   for (const tier of tiers) {
     const paths = [...new Set(tier.map(c => text(c.path, '封面路径')))];
     if (paths.length === 0) continue;
-    if (paths.length > 1) throw Error('有几张候选封面，分不清用哪张：请在片场给小红书登记一张 3:4 封面');
+    if (paths.length > 1) throw Error(`有几张候选封面，分不清用哪张：请在片场给小红书登记一张 ${ratio} 封面`);
     const file = projectFile(root, paths[0]);
     if (!['.png', '.jpg', '.jpeg', '.webp'].includes(path.extname(file).toLowerCase()) || fs.statSync(file).size === 0) throw Error('封面需要非空的 PNG、JPEG 或 WebP 图片');
     return file;

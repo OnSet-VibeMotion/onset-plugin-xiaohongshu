@@ -18,6 +18,34 @@ export function publishReady(): boolean {
 export function coverDialogOpen(): boolean { return [...document.querySelectorAll<HTMLElement>('.d-modal, [role="dialog"]')].some(e => e.getClientRects().length > 0); }
 export function coverConfirmReady(): boolean { return [...document.querySelectorAll<HTMLButtonElement>('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button')].some(e => e.textContent?.trim() === '确定' && !e.disabled && e.getClientRects().length > 0); }
 export function coverDialogClosed(): boolean { return [...document.querySelectorAll<HTMLElement>('.d-modal, [role="dialog"]')].every(e => !e.getClientRects().length); }
+/*
+ * 新版的封面（2026-11-18 在真实页面上核对过）：
+ * - 入口：「设置封面」一节（.cover-plugin-preview）里的 div.cover-edit-entry「编辑封面」；
+ * - 编辑器：.d-modal-mask 里的 .d-modal.main-cover-editor-modal，标题 h6「设置封面」；
+ * - 上传：编辑器里 label.upload-btn > input.upload-input[accept*="image"]（aria-label「上传封面图片」）。
+ *   传上去之后这个文件框就没了，换成 button.uploaded-thumbnail，清除按钮是 [aria-label="清除已上传封面"]；
+ * - 完成：button.mojito-button「完成」。点右上角的 img.close-icon 会问「关闭后操作将不会保留」。
+ */
+export function coverEntryPresent(): boolean {
+  return !!document.querySelector('.cover-edit-entry, div.upload-cover, button.upload-cover');
+}
+export function coverEditorOpen(): boolean {
+  const m = document.querySelector<HTMLElement>('.main-cover-editor-modal');
+  return !!m && m.getClientRects().length > 0;
+}
+/** 编辑器里已经有一张传上去的封面（接着草稿做时常见）：先清掉，文件框才会回来。 */
+export function clearUploadedCover(): boolean {
+  const clear = document.querySelector<HTMLElement>('.main-cover-editor-modal [aria-label="清除已上传封面"]');
+  if (!clear) return false;
+  clear.click(); return true;
+}
+export function coverInputReady(): boolean { return !!document.querySelector('.main-cover-editor-modal input[type="file"][accept*="image"]'); }
+export function coverUploaded(): boolean { return !!document.querySelector('.main-cover-editor-modal .uploaded-thumbnail'); }
+export function clickCoverDone(): boolean {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('.main-cover-editor-modal button')].find(b => b.textContent?.trim() === '完成' && !b.disabled && b.getClientRects().length);
+  if (!button) return false;
+  button.click(); return true;
+}
 export function clickControl({ selector, exactText }: { selector: string; exactText?: string }): boolean {
   const matches = [...document.querySelectorAll<HTMLElement>(selector)].filter(e => e.getClientRects().length && (!exactText || e.textContent?.trim() === exactText));
   const element = matches.find(e => !matches.some(other => other !== e && e.contains(other)));
