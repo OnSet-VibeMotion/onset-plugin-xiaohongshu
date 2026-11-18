@@ -39,8 +39,11 @@ export async function readDraft(root: string): Promise<Draft> {
     const attribution = text(credits.text, '素材署名');
     if (!content.includes(attribution)) content += `\n\n${attribution}`;
   }
-  const tags = copy.hashtags ?? [];
-  if (!Array.isArray(tags) || tags.length > 10) throw Error('话题应是最多 10 项的列表');
+  // 话题优先用为小红书单独写的完整列表（copy.platform_hashtags.xiaohongshu，空列表就是不带话题），没写才用通用的 copy.hashtags。
+  const platformTags = copy.platform_hashtags ? record(copy.platform_hashtags) : {};
+  const ownTags = Object.hasOwn(platformTags, 'xiaohongshu');
+  const tags = ownTags ? platformTags.xiaohongshu : copy.hashtags ?? [];
+  if (!Array.isArray(tags) || tags.length > 10) throw Error(ownTags ? '小红书话题（copy.platform_hashtags.xiaohongshu）应是最多 10 项的列表' : '话题应是最多 10 项的列表');
   const normalizedTags = [...new Set(tags.map(tag => {
     const normalized = text(tag, '话题').replace(/^#/, '');
     if (!normalized || /[\s#\x00-\x1f]/.test(normalized)) throw Error('话题不能包含空格、换行或多余的 #');

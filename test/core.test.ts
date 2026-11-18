@@ -124,6 +124,15 @@ describe('发布素材', () => {
     expect(await pick([])).toBe('');
     expect(await pick(undefined)).toBe('');
   });
+  it('话题优先用为小红书单独写的列表，空列表就是不带话题；没写才用通用话题', async () => {
+    const own = await readDraft(project({ copy: { primary_title: '标题', introduction: '正文', hashtags: ['通用'], platform_hashtags: { xiaohongshu: ['#通用', '小红书活动'], douyin: ['别的平台'] } } }));
+    expect(own.tags).toEqual(['通用', '小红书活动']);
+    const none = await readDraft(project({ copy: { primary_title: '标题', introduction: '正文', hashtags: ['通用'], platform_hashtags: { xiaohongshu: [] } } }));
+    expect(none.tags).toEqual([]);
+    const shared = await readDraft(project({ copy: { primary_title: '标题', introduction: '正文', hashtags: ['通用'], platform_hashtags: { douyin: ['别的平台'] } } }));
+    expect(shared.tags).toEqual(['通用']);
+    await expect(readDraft(project({ copy: { primary_title: '标题', introduction: '正文', platform_hashtags: { xiaohongshu: '小红书活动' } } }))).rejects.toThrow('copy.platform_hashtags.xiaohongshu');
+  });
   it('不截断标题，不悄悄忽略多张候选封面', async () => {
     await expect(readDraft(project({ copy: { primary_title: '长'.repeat(21), introduction: '正文' } }))).rejects.toThrow('标题');
     await expect(readDraft(project({ cover: { images: [

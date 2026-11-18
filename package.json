@@ -1,6 +1,6 @@
 {
   "name": "onset-plugin-xiaohongshu",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "private": true,
   "type": "module",
   "description": "片场小红书插件：客户端内自动上传填写，多账号独立登录，用户检查并发布",

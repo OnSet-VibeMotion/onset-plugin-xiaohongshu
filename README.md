@@ -28,7 +28,7 @@ github:OnSet-VibeMotion/onset-plugin-xiaohongshu#main
 
 ## 内容与状态
 
-- 本版处理**视频笔记**，读取 `publish.md` 的 `video.path`、`copy.primary_title`、`copy.introduction`、`copy.hashtags`、`credits` 与 `cover.images`。优先使用小红书的 3:4 封面；候选不明确时停止。
+- 本版处理**视频笔记**，读取 `publish.md` 的 `video.path`、`copy.primary_title`、`copy.introduction`、话题（优先 `copy.platform_hashtags.xiaohongshu`，没写才用 `copy.hashtags`）、`credits` 与 `cover.images`。优先使用小红书的 3:4 封面；候选不明确时停止。
 - 有成片 SHA-256 时先校验。文件真实路径必须位于项目内，拒绝符号链接指向项目外的素材。
 - 话题匹配不到联想项时保留 `#话题` 文字并提醒检查。封面失败时报告失败，保留内嵌页面。
 - `ready_to_publish` 只表示填表完成，**不表示发布成功**。插件没有自动发布、定时提交、后台批量发布或提交重试功能。

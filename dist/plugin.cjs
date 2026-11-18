@@ -7934,8 +7934,10 @@ async function readDraft(root) {
 
 ${attribution}`;
   }
-  const tags = copy.hashtags ?? [];
-  if (!Array.isArray(tags) || tags.length > 10) throw Error("\u8BDD\u9898\u5E94\u662F\u6700\u591A 10 \u9879\u7684\u5217\u8868");
+  const platformTags = copy.platform_hashtags ? record(copy.platform_hashtags) : {};
+  const ownTags = Object.hasOwn(platformTags, "xiaohongshu");
+  const tags = ownTags ? platformTags.xiaohongshu : copy.hashtags ?? [];
+  if (!Array.isArray(tags) || tags.length > 10) throw Error(ownTags ? "\u5C0F\u7EA2\u4E66\u8BDD\u9898\uFF08copy.platform_hashtags.xiaohongshu\uFF09\u5E94\u662F\u6700\u591A 10 \u9879\u7684\u5217\u8868" : "\u8BDD\u9898\u5E94\u662F\u6700\u591A 10 \u9879\u7684\u5217\u8868");
   const normalizedTags = [...new Set(tags.map((tag) => {
     const normalized = text(tag, "\u8BDD\u9898").replace(/^#/, "");
     if (!normalized || /[\s#\x00-\x1f]/.test(normalized)) throw Error("\u8BDD\u9898\u4E0D\u80FD\u5305\u542B\u7A7A\u683C\u3001\u6362\u884C\u6216\u591A\u4F59\u7684 #");
