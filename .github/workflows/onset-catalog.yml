@@ -10,7 +10,7 @@ on:
 
 jobs:
   catalog:
-    uses: OnSet-VibeMotion/onset-plugins/.github/workflows/bump.yml@main
+    uses: OnSet-VibeMotion/onset-plugins/.github/workflows/bump.yml@v1
     with:
       id: xiaohongshu-upload
     secrets:
