@@ -5,7 +5,7 @@ import { delay, Page } from './cdp';
 import * as scripts from './page-scripts';
 import { readDraft } from './draft';
 import { writeProjectJSON } from './files';
-import { preparePage, type Progress } from './prepare';
+import { AlreadyPublished, canResume, editorHoldsFilm, preparePage, type Progress } from './prepare';
 
 export interface Request {
   /** 空字符串：没打开项目时从片场设置里点的账号操作，不往项目里写任何东西。 */
@@ -39,7 +39,7 @@ export function validateRequest(raw: unknown): Request {
   if (typeof r.data_dir !== 'string' || !path.isAbsolute(r.data_dir)) throw Error('data_dir 需要绝对路径');
   if (typeof r.project_root !== 'string' || (r.project_root !== '' && !path.isAbsolute(r.project_root))) throw Error('project_root 需要绝对路径');
   const params = object(r.params ?? {}), settings = object(r.settings ?? {});
-  for (const key of Object.keys(params)) if (!['account'].includes(key)) throw Error(`不支持参数 ${key}；插件不会自动发布`);
+  for (const key of Object.keys(params)) if (!['account', 'again'].includes(key)) throw Error(`不支持参数 ${key}；插件不会自动发布`);
   for (const value of Object.values(params)) if (typeof value !== 'string' || value.length > 500) throw Error('参数需要字符串');
   const browser = r.browser === undefined ? undefined : validateBridge(r.browser);
   return { project_root: r.project_root, data_dir: r.data_dir, params, settings, browser };
@@ -93,11 +93,40 @@ export async function runOperation(operation: string, raw: unknown, progress: Pr
       const browser = await deps.open(store.profile(account!.id), { bridge: request.browser, account: account!.id, label: account!.name, hint: draft ? '请检查账号与内容，发布由你确认' : '这是这个账号的小红书窗口' });
       try {
         const page = await deps.page(browser);
-        if (draft || !browser.reused) await page.navigate(page.origin + (draft ? '/publish/publish?from=menu&target=video' : '/'));
+        // 窗口还停在这个成片的编辑页（上次等上传时中断了，或从草稿箱打开了它）：接着用，不跳回上传页重传。
+        // 是不是这个成片：插件记下的指纹，或编辑页里视频的时长。换了成片或页面已离开编辑页才重新上传。
+        const resume = !!draft && browser.reused === true && await canResume(page)
+          && (store.lastUpload(account!.id) === draft.videoHash || await editorHoldsFilm(page, draft));
+        if (!resume && (draft || !browser.reused)) await page.navigate(page.origin + (draft ? '/publish/publish?from=menu&target=video' : '/'));
         if (!draft) return { status: 'browser_opened', message: `已打开「${account!.name}」的小红书窗口`, account };
-        const warnings = await deps.prepare(page, draft, (fraction, message) => {
-          progress(fraction, message); update({ status: 'running', message, account });
-        });
+        // 视频交给小红书之后（或接着上次的上传）到填完：页面上盖遮罩显示进度，免得用户点乱。登录、找上传入口时不盖，用户可能要在页面上登录。
+        // 旧版片场不认遮罩命令，照常进行。小红书弹出验证时揭开遮罩交给用户（paused），验证没了再按最近的进度盖上。
+        let masked = false, paused = false, lastMessage = '', lastFraction = 0;
+        const mask = (message: string, fraction: number) => {
+          masked = true;
+          lastMessage = message; lastFraction = Math.max(0, Math.min(1, fraction));
+          if (!paused) void browser.busy?.(lastMessage, lastFraction).catch(() => {});
+        };
+        if (resume) mask('接着上次的上传', 0.2);
+        let warnings: string[];
+        try {
+          warnings = await deps.prepare(page, draft, (fraction, message) => {
+            progress(fraction, message); update({ status: 'running', message, account });
+            if (masked && !paused) mask(message, fraction);
+          }, {
+            resume,
+            again: params.again === '1',
+            onUpload: () => { store.recordUpload(account!.id, draft.videoHash); mask('正在上传视频', 0.2); },
+            onPause: () => { paused = true; if (masked) void browser.idle?.().catch(() => {}); },
+            onResume: () => { paused = false; if (masked) mask(lastMessage, lastFraction); },
+          });
+        } catch (err) {
+          // 这个成片已经发过：不算失败，交给用户在插件页面决定要不要「仍然上传」。
+          if (err instanceof AlreadyPublished) return { status: 'already_published', message: err.message, account };
+          throw err;
+        } finally {
+          if (masked) await browser.idle?.().catch(() => {});
+        }
         await page.raw('Page.bringToFront');
         return { status: 'ready_to_publish', message: '内容已填好，请在小红书页面核对账号、封面和文案，再手动发布', account, warnings, video_sha256: draft.videoHash };
       } finally { browser.disconnect(); }

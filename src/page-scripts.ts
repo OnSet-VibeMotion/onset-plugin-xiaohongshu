@@ -2,10 +2,54 @@
  * Their behavior is verified by prepare.browser.test.ts; Node V8 cannot measure them. */
 export function query(selector: string): Element | null { return document.querySelector(selector); }
 export function uploadInputPresent(): boolean { return !!document.querySelector('input.upload-input, input[type="file"][accept*="video"]'); }
-export function videoUploaded(): boolean {
-  const title = document.querySelector<HTMLInputElement>('input[placeholder*="标题"], div.d-input input');
-  const text = document.body.innerText;
-  return !!title && !title.disabled && /上传成功|重新上传|设置封面|编辑封面/.test(text) && !/正在上传|上传中|正在转码|处理中/.test(text);
+/**
+ * 视频笔记的上传状态。小红书选好视频后就进编辑页，视频在页面上一边传一边显示「上传中」与百分比，
+ * 传完显示「上传成功」「重新上传」/「替换视频」，「设置封面」一节也出来了。
+ * percent 先取上传状态那几块（进度、stage、上传卡片）文字里的百分比，再看整页「上传/处理…xx%」，最后看进度条的 aria-valuenow；
+ * 读不到为 null。none 表示页面上看不出有视频在传（还在上传入口页，或者编辑页上没有视频的痕迹）。
+ * 2026-11-19 核对过上传入口页（input.upload-input、「拖拽视频到此或点击上传」，这时是 none）；上传中、失败时的文字与进度条
+ * 没有在真实页面上看到（核对时不上传），按常见写法认，未核实。
+ */
+export interface VideoStatus { state: 'none' | 'uploading' | 'ready' | 'failed'; text: string; percent: number | null }
+export function videoStatus(): VideoStatus {
+  const skip = '.main-cover-editor-modal, .d-modal, .draft-drawer, #creator-editor-topic-container';
+  const nodes = [...document.querySelectorAll<HTMLElement>('[class*="progress"], [class*="stage"], [class*="upload-content"], [class*="uploading"], [role="progressbar"], [role="alert"]')]
+    .filter(node => node.getClientRects().length && !node.closest(skip));
+  const text = nodes.map(node => node.innerText.trim()).filter(Boolean).join('\n').slice(0, 500);
+  const body = document.body.innerText;
+  const bars = nodes.flatMap(node => [node, ...node.querySelectorAll<HTMLElement>('[role="progressbar"]')]);
+  const bar = bars.find(node => node.hasAttribute('aria-valuenow'));
+  const value = Number(bar?.getAttribute('aria-valuenow')), max = Number(bar?.getAttribute('aria-valuemax') || 100);
+  const match = text.match(/(\d{1,3}(?:\.\d+)?)\s*%/) ?? body.match(/(?:上传|处理|转码)[^\n%]{0,10}?(\d{1,3}(?:\.\d+)?)\s*%/);
+  const percent = match ? Math.min(100, Number(match[1]))
+    : bar && Number.isFinite(value) && max > 0 ? Math.min(100, Math.max(0, value / max * 100)) : null;
+  if (/(上传|转码|处理|解析)失败/.test(`${text}\n${body}`)) return { state: 'failed', text, percent };
+  const busy = /正在上传|上传中|正在转码|转码中|处理中|解析中/.test(body);
+  const title = [...document.querySelectorAll<HTMLInputElement>('input[placeholder*="标题"], div.d-input input')]
+    .some(input => input.getClientRects().length && !input.disabled && !input.closest(skip));
+  if (title && !busy && /上传成功|重新上传|替换视频|设置封面|编辑封面/.test(body)) return { state: 'ready', text, percent };
+  return { state: busy || percent !== null ? 'uploading' : 'none', text, percent };
+}
+
+/** 页面停在视频笔记的编辑页（选好视频后才有标题框）。 */
+export function editorOpen(): boolean {
+  return [...document.querySelectorAll<HTMLInputElement>('input[placeholder*="标题"], div.d-input input')]
+    .some(input => input.getClientRects().length && !input.disabled && !input.closest('.main-cover-editor-modal, .d-modal'));
+}
+
+/**
+ * 小红书弹出了要用户自己做的验证：滑块、点选验证码、短信或身份确认。验证组件挂在 captcha / verify 容器或 iframe 里
+ * （小红书的是 red-captcha，登录与风控页在 website-login 下）；身份确认是普通弹窗，按文字认。只认看得见的，封面编辑器不算。
+ * 2026-11-19 核对过创作者中心会载入 edith.xiaohongshu.com/api/redcaptcha 的配置；验证弹出来时的 DOM 没见到，选择器未核实。
+ */
+export function verificationOpen(): boolean {
+  const visible = (node: Element) => node.getClientRects().length > 0 && (node as HTMLElement).offsetWidth > 20 && (node as HTMLElement).offsetHeight > 20;
+  const cover = '.main-cover-editor-modal, .cover-modal';
+  const widgets = '[class*="red-captcha"], [class*="redcaptcha"], [class*="captcha"], [id*="captcha"], [class*="verify-container"], [class*="verify-modal"], [class*="verifyContainer"], iframe[src*="captcha"], iframe[src*="verify"], iframe[src*="website-login"]';
+  if ([...document.querySelectorAll(widgets)].some(node => visible(node) && !node.closest(cover))) return true;
+  return [...document.querySelectorAll<HTMLElement>('[role="dialog"], .d-modal, [class*="modal"]')]
+    .some(dialog => visible(dialog) && !dialog.closest(cover) && !dialog.querySelector(cover)
+      && /安全验证|身份验证|身份校验|人机验证|请完成.{0,6}验证|验证码|滑块|拖动.{0,4}完成|向右拖动/.test(dialog.innerText.slice(0, 300)));
 }
 export function publishReady(): boolean {
   return [...document.querySelectorAll<HTMLElement>('button, xhs-publish-btn')].some(element => {
@@ -86,31 +130,49 @@ export function insertedTopics(): { count: number; last: string; names: string[]
   return { count: nodes.length, last: last.replace(/^#/, '').trim(), names: nodes.map(nameOf) };
 }
 /**
- * 小红书把视频笔记的草稿存在这个浏览器本地（IndexedDB `draft-database-v1` 的 `video-draft`），
- * 每条记着已经传到小红书的视频（`content.draftStore.video.fsize` 是文件字节数）。找视频大小与这次成片相同、最新的那条，
- * 返回它在草稿箱里显示的标题与保存时间（草稿箱只按这两样列出）；没有就返回 null。读不了也当没有。
+ * 小红书把视频笔记的草稿存在这个浏览器本地：IndexedDB `draft-database-v1` 的 `video-draft`（2026-11-19 在真实页面上核对过库与
+ * 表名，以及 `content.draftStore.video` 的字段：width、height、fileid、fsize 字节数、duration）。新版页面另有 `xhs-creator-draft`
+ * 库里的 `video-Draft-<用户编号>` 表（核对时是空的，记录形状未核实，按同样的字段读）。
+ * 找视频大小与这次成片相同、时长也对得上（草稿记了时长、成片读得出时长时；单位未核实，秒或毫秒都认，差 1.5 秒以内）、最新的那条，
+ * 返回它在草稿箱里显示的标题与保存时间（草稿箱只按这两样列出）；没有就返回 null。读不了也当没有。只读，不改也不删草稿。
  */
-export async function findVideoDraft(size: number): Promise<{ title: string; time: string } | null> {
+export async function findVideoDraft(film: { size: number; duration: number | null }): Promise<{ title: string; time: string } | null> {
+  const readAll = (name: string, stores: (names: string[]) => string[]) => new Promise<any[]>((resolve) => {
+    let open: IDBOpenDBRequest;
+    try { open = indexedDB.open(name); } catch { resolve([]); return; }
+    open.onerror = () => resolve([]);
+    open.onupgradeneeded = () => { open.transaction?.abort(); resolve([]); };
+    open.onsuccess = () => {
+      const db = open.result;
+      const wanted = stores([...db.objectStoreNames]);
+      if (!wanted.length) { db.close(); resolve([]); return; }
+      const records: any[] = [];
+      let left = wanted.length;
+      for (const store of wanted) {
+        const all = db.transaction(store, 'readonly').objectStore(store).getAll();
+        all.onsuccess = () => { records.push(...all.result); if (!--left) { db.close(); resolve(records); } };
+        all.onerror = () => { if (!--left) { db.close(); resolve(records); } };
+      }
+    };
+  });
   try {
-    const records = await new Promise<any[]>((resolve) => {
-      const open = indexedDB.open('draft-database-v1');
-      open.onerror = () => resolve([]);
-      open.onupgradeneeded = () => { open.transaction?.abort(); resolve([]); };
-      open.onsuccess = () => {
-        const db = open.result;
-        if (![...db.objectStoreNames].includes('video-draft')) { db.close(); resolve([]); return; }
-        const all = db.transaction('video-draft', 'readonly').objectStore('video-draft').getAll();
-        all.onsuccess = () => { db.close(); resolve(all.result); };
-        all.onerror = () => { db.close(); resolve([]); };
-      };
-    });
+    const records = [
+      ...await readAll('draft-database-v1', names => names.filter(n => n === 'video-draft')),
+      ...await readAll('xhs-creator-draft', names => names.filter(n => /^video-draft/i.test(n))),
+    ];
+    const videoOf = (r: any) => r?.content?.draftStore?.video ?? r?.draftStore?.video;
+    const durationMatches = (value: unknown) => {
+      const d = Number(value);
+      if (film.duration == null || !Number.isFinite(d) || d <= 0) return true;
+      return Math.abs(d * 1000 - film.duration) <= 1500 || Math.abs(d - film.duration) <= 1500;
+    };
     const hit = records
-      .filter(r => r?.content?.draftStore?.video?.fsize === size && r?.content?.draftStore?.video?.fileid)
+      .filter(r => videoOf(r)?.fsize === film.size && videoOf(r)?.fileid && durationMatches(videoOf(r)?.duration))
       .sort((a, b) => (b.timeStamp ?? 0) - (a.timeStamp ?? 0))[0];
     if (!hit) return null;
     const t = new Date(hit.timeStamp), two = (n: number) => String(n).padStart(2, '0');
     const time = `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())} ${two(t.getHours())}:${two(t.getMinutes())}:${two(t.getSeconds())}`;
-    return { title: String(hit.content.draftStore.title ?? ''), time };
+    return { title: String((hit.content ?? hit).draftStore?.title ?? ''), time };
   } catch { return null; }
 }
 export function draftDrawerOpen(): boolean { return !![...document.querySelectorAll<HTMLElement>('.draft-drawer .draft-item, .draft-list .draft-item')].find(e => e.getClientRects().length); }
@@ -193,4 +255,50 @@ export async function loginInfo(): Promise<{ name: string; avatar: string; user_
   const name = nameEl?.textContent?.trim() ?? '';
   if (!name || !avatar) return null;
   return { name, avatar: url(avatar.src) ? avatar.src : '', user_id: '' };
+}
+
+export interface PublishedNote { title: string; type: string; duration: number | null; time: string; reviewing: boolean }
+/**
+ * 这个账号最近发的笔记（创作者中心「笔记管理」用的接口，2026-11-19 在真实页面上核对过）：
+ * GET /api/galaxy/v2/creator/note/user/posted?tab=0&page=<n>，要带页面自己的签名（window._webmsxyw 算出 X-s / X-t，
+ * 不带回 406）；回 { code: 0, success: true, data: { notes, page } }，page 是下一页、没有了为 -1。每条笔记：display_title、
+ * type（video / normal）、video_info.duration（秒）、time（「2026-11-18 15:44」）、tab_status（已发布为 1；审核中的取值未核实，按 2 认）。
+ * tab=0 是全部笔记，含审核中与未通过的。读不到返回 null（读到几页算几页）。
+ */
+export async function recentNotes(pages: number): Promise<PublishedNote[] | null> {
+  const notes: PublishedNote[] = [];
+  let next = 0;
+  for (let page = 0; page < pages && next >= 0; page++) {
+    let data: any;
+    try {
+      const url = `/api/galaxy/v2/creator/note/user/posted?tab=0&page=${next}`;
+      const headers: Record<string, string> = {};
+      const sign = (window as any)._webmsxyw;
+      if (typeof sign === 'function') {
+        const signed = sign(url, undefined);
+        if (signed?.['X-s']) { headers['x-s'] = String(signed['X-s']); headers['x-t'] = String(signed['X-t']); }
+      }
+      const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', headers, signal: AbortSignal.timeout(8000) });
+      if (!response.ok) return page ? notes : null;
+      data = await response.json();
+    } catch { return page ? notes : null; }
+    if (data?.code !== 0 || !Array.isArray(data?.data?.notes)) return page ? notes : null;
+    for (const note of data.data.notes) {
+      const seconds = Number(note?.video_info?.duration);
+      notes.push({
+        title: String(note?.display_title ?? note?.title ?? ''), type: String(note?.type ?? ''),
+        duration: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null,
+        time: String(note?.time ?? ''), reviewing: note?.tab_status === 2,
+      });
+    }
+    next = Number(data.data.page ?? -1);
+    if (!Number.isFinite(next)) break;
+  }
+  return notes;
+}
+
+/** 编辑页里预览视频的时长（秒）：小红书在编辑页放着已经选好的视频（元素未在真实页面上核实）。没有为 null。 */
+export function editorVideoDuration(): number | null {
+  const durations = [...document.querySelectorAll('video')].map(video => video.duration).filter(value => Number.isFinite(value) && value > 0);
+  return durations.length ? Math.max(...durations) : null;
 }

@@ -19,7 +19,7 @@ async function loadAccounts() {
 }
 function status(message, error = false) { $('status').textContent = message; $('status').dataset.error = String(error); }
 function buttons() {
-  for (const id of ['prepare', 'open']) $(id).disabled = !!running || !$('accounts').value;
+  for (const id of ['prepare', 'open', 'again']) $(id).disabled = !!running || !$('accounts').value;
   for (const id of ['login', 'refresh']) $(id).disabled = !!running;
   $('accounts').disabled = !!running;
   const account = accounts.find(a => a.id === $('accounts').value);
@@ -45,6 +45,8 @@ async function refresh() {
       await loadAccounts();
       if (latest.account && accounts.some(a => a.id === latest.account.id)) $('accounts').value = latest.account.id;
     }
+    // 这个成片已经发过：插件没上传，用户确实要再发一次才点「仍然上传」。
+    $('again').hidden = latest.status !== 'already_published' || !!running;
   } else if (!running) status(accounts.length ? '选择账号后，打开小红书或上传并填写。' : '先点「登录新账号」，在弹出的小红书页面登录。');
   buttons();
 }
@@ -64,6 +66,7 @@ $('refresh').onclick = () => { if (!running) void loadAccounts().then(refresh); 
 $('login').onclick = () => run('login');
 $('open').onclick = () => run('open_account', { account: $('accounts').value });
 $('prepare').onclick = () => run('prepare', { account: $('accounts').value });
+$('again').onclick = () => { $('again').hidden = true; run('prepare', { account: $('accounts').value, again: '1' }); };
 // 项目或任务有变化（例如在设置里登录了新账号）：重读；自己读列表引起的那一下跳过。
 onset.onRefresh(() => { if (!running && Date.now() - listedAt > 3000) void loadAccounts().then(refresh); else void refresh(); });
 onset.ready.then(loadAccounts).then(refresh).catch(err => status(err.message, true));

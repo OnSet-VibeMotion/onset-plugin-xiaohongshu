@@ -7494,6 +7494,23 @@ var AccountStore = class {
     import_node_fs2.default.rmSync(import_node_path2.default.join(this.root, id), { recursive: true, force: true });
     import_node_fs2.default.rmSync(import_node_path2.default.join(import_node_fs2.default.realpathSync(this.dataDir), "web-sessions", id), { recursive: true, force: true });
   }
+  /**
+   * 这个账号的小红书窗口里最近一次由插件放进去的成片（sha256）。窗口还停在它的编辑页时，再点「上传并填写」接着这次的上传，
+   * 不重传。只记成片的摘要，不记项目路径与文案。
+   */
+  lastUpload(id) {
+    if (!accountID.test(id)) return void 0;
+    try {
+      const value = readSmallJSON(import_node_path2.default.join(this.root, id, "upload.json"));
+      return typeof value?.video_sha256 === "string" ? value.video_sha256 : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  recordUpload(id, videoHash) {
+    this.get(id);
+    atomicJSON(import_node_path2.default.join(childDirectory(this.root, id), "upload.json"), { video_sha256: videoHash, uploaded_at: (/* @__PURE__ */ new Date()).toISOString() });
+  }
   profile(id) {
     this.get(id);
     return childDirectory(this.root, `${id}/browser`);
@@ -7540,10 +7557,32 @@ function query(selector) {
 function uploadInputPresent() {
   return !!document.querySelector('input.upload-input, input[type="file"][accept*="video"]');
 }
-function videoUploaded() {
-  const title = document.querySelector('input[placeholder*="\u6807\u9898"], div.d-input input');
-  const text2 = document.body.innerText;
-  return !!title && !title.disabled && /上传成功|重新上传|设置封面|编辑封面/.test(text2) && !/正在上传|上传中|正在转码|处理中/.test(text2);
+function videoStatus() {
+  const skip = ".main-cover-editor-modal, .d-modal, .draft-drawer, #creator-editor-topic-container";
+  const nodes = [...document.querySelectorAll('[class*="progress"], [class*="stage"], [class*="upload-content"], [class*="uploading"], [role="progressbar"], [role="alert"]')].filter((node) => node.getClientRects().length && !node.closest(skip));
+  const text2 = nodes.map((node) => node.innerText.trim()).filter(Boolean).join("\n").slice(0, 500);
+  const body = document.body.innerText;
+  const bars = nodes.flatMap((node) => [node, ...node.querySelectorAll('[role="progressbar"]')]);
+  const bar = bars.find((node) => node.hasAttribute("aria-valuenow"));
+  const value = Number(bar?.getAttribute("aria-valuenow")), max = Number(bar?.getAttribute("aria-valuemax") || 100);
+  const match = text2.match(/(\d{1,3}(?:\.\d+)?)\s*%/) ?? body.match(/(?:上传|处理|转码)[^\n%]{0,10}?(\d{1,3}(?:\.\d+)?)\s*%/);
+  const percent = match ? Math.min(100, Number(match[1])) : bar && Number.isFinite(value) && max > 0 ? Math.min(100, Math.max(0, value / max * 100)) : null;
+  if (/(上传|转码|处理|解析)失败/.test(`${text2}
+${body}`)) return { state: "failed", text: text2, percent };
+  const busy = /正在上传|上传中|正在转码|转码中|处理中|解析中/.test(body);
+  const title = [...document.querySelectorAll('input[placeholder*="\u6807\u9898"], div.d-input input')].some((input) => input.getClientRects().length && !input.disabled && !input.closest(skip));
+  if (title && !busy && /上传成功|重新上传|替换视频|设置封面|编辑封面/.test(body)) return { state: "ready", text: text2, percent };
+  return { state: busy || percent !== null ? "uploading" : "none", text: text2, percent };
+}
+function editorOpen() {
+  return [...document.querySelectorAll('input[placeholder*="\u6807\u9898"], div.d-input input')].some((input) => input.getClientRects().length && !input.disabled && !input.closest(".main-cover-editor-modal, .d-modal"));
+}
+function verificationOpen() {
+  const visible = (node) => node.getClientRects().length > 0 && node.offsetWidth > 20 && node.offsetHeight > 20;
+  const cover = ".main-cover-editor-modal, .cover-modal";
+  const widgets = '[class*="red-captcha"], [class*="redcaptcha"], [class*="captcha"], [id*="captcha"], [class*="verify-container"], [class*="verify-modal"], [class*="verifyContainer"], iframe[src*="captcha"], iframe[src*="verify"], iframe[src*="website-login"]';
+  if ([...document.querySelectorAll(widgets)].some((node) => visible(node) && !node.closest(cover))) return true;
+  return [...document.querySelectorAll('[role="dialog"], .d-modal, [class*="modal"]')].some((dialog) => visible(dialog) && !dialog.closest(cover) && !dialog.querySelector(cover) && /安全验证|身份验证|身份校验|人机验证|请完成.{0,6}验证|验证码|滑块|拖动.{0,4}完成|向右拖动/.test(dialog.innerText.slice(0, 300)));
 }
 function publishReady() {
   return [...document.querySelectorAll("button, xhs-publish-btn")].some((element) => {
@@ -7625,38 +7664,64 @@ function insertedTopics() {
   }
   return { count: nodes.length, last: last.replace(/^#/, "").trim(), names: nodes.map(nameOf) };
 }
-async function findVideoDraft(size) {
-  try {
-    const records = await new Promise((resolve) => {
-      const open = indexedDB.open("draft-database-v1");
-      open.onerror = () => resolve([]);
-      open.onupgradeneeded = () => {
-        open.transaction?.abort();
+async function findVideoDraft(film) {
+  const readAll = (name, stores) => new Promise((resolve) => {
+    let open;
+    try {
+      open = indexedDB.open(name);
+    } catch {
+      resolve([]);
+      return;
+    }
+    open.onerror = () => resolve([]);
+    open.onupgradeneeded = () => {
+      open.transaction?.abort();
+      resolve([]);
+    };
+    open.onsuccess = () => {
+      const db = open.result;
+      const wanted = stores([...db.objectStoreNames]);
+      if (!wanted.length) {
+        db.close();
         resolve([]);
-      };
-      open.onsuccess = () => {
-        const db = open.result;
-        if (![...db.objectStoreNames].includes("video-draft")) {
-          db.close();
-          resolve([]);
-          return;
-        }
-        const all = db.transaction("video-draft", "readonly").objectStore("video-draft").getAll();
+        return;
+      }
+      const records = [];
+      let left = wanted.length;
+      for (const store of wanted) {
+        const all = db.transaction(store, "readonly").objectStore(store).getAll();
         all.onsuccess = () => {
-          db.close();
-          resolve(all.result);
+          records.push(...all.result);
+          if (!--left) {
+            db.close();
+            resolve(records);
+          }
         };
         all.onerror = () => {
-          db.close();
-          resolve([]);
+          if (!--left) {
+            db.close();
+            resolve(records);
+          }
         };
-      };
-    });
-    const hit = records.filter((r) => r?.content?.draftStore?.video?.fsize === size && r?.content?.draftStore?.video?.fileid).sort((a, b) => (b.timeStamp ?? 0) - (a.timeStamp ?? 0))[0];
+      }
+    };
+  });
+  try {
+    const records = [
+      ...await readAll("draft-database-v1", (names) => names.filter((n) => n === "video-draft")),
+      ...await readAll("xhs-creator-draft", (names) => names.filter((n) => /^video-draft/i.test(n)))
+    ];
+    const videoOf = (r) => r?.content?.draftStore?.video ?? r?.draftStore?.video;
+    const durationMatches = (value) => {
+      const d = Number(value);
+      if (film.duration == null || !Number.isFinite(d) || d <= 0) return true;
+      return Math.abs(d * 1e3 - film.duration) <= 1500 || Math.abs(d - film.duration) <= 1500;
+    };
+    const hit = records.filter((r) => videoOf(r)?.fsize === film.size && videoOf(r)?.fileid && durationMatches(videoOf(r)?.duration)).sort((a, b) => (b.timeStamp ?? 0) - (a.timeStamp ?? 0))[0];
     if (!hit) return null;
     const t = new Date(hit.timeStamp), two = (n) => String(n).padStart(2, "0");
     const time = `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())} ${two(t.getHours())}:${two(t.getMinutes())}:${two(t.getSeconds())}`;
-    return { title: String(hit.content.draftStore.title ?? ""), time };
+    return { title: String((hit.content ?? hit).draftStore?.title ?? ""), time };
   } catch {
     return null;
   }
@@ -7755,6 +7820,48 @@ async function loginInfo() {
   if (!name || !avatar) return null;
   return { name, avatar: url(avatar.src) ? avatar.src : "", user_id: "" };
 }
+async function recentNotes(pages) {
+  const notes = [];
+  let next = 0;
+  for (let page = 0; page < pages && next >= 0; page++) {
+    let data;
+    try {
+      const url = `/api/galaxy/v2/creator/note/user/posted?tab=0&page=${next}`;
+      const headers = {};
+      const sign = window._webmsxyw;
+      if (typeof sign === "function") {
+        const signed = sign(url, void 0);
+        if (signed?.["X-s"]) {
+          headers["x-s"] = String(signed["X-s"]);
+          headers["x-t"] = String(signed["X-t"]);
+        }
+      }
+      const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers, signal: AbortSignal.timeout(8e3) });
+      if (!response.ok) return page ? notes : null;
+      data = await response.json();
+    } catch {
+      return page ? notes : null;
+    }
+    if (data?.code !== 0 || !Array.isArray(data?.data?.notes)) return page ? notes : null;
+    for (const note of data.data.notes) {
+      const seconds = Number(note?.video_info?.duration);
+      notes.push({
+        title: String(note?.display_title ?? note?.title ?? ""),
+        type: String(note?.type ?? ""),
+        duration: Number.isFinite(seconds) && seconds > 0 ? seconds * 1e3 : null,
+        time: String(note?.time ?? ""),
+        reviewing: note?.tab_status === 2
+      });
+    }
+    next = Number(data.data.page ?? -1);
+    if (!Number.isFinite(next)) break;
+  }
+  return notes;
+}
+function editorVideoDuration() {
+  const durations = [...document.querySelectorAll("video")].map((video) => video.duration).filter((value) => Number.isFinite(value) && value > 0);
+  return durations.length ? Math.max(...durations) : null;
+}
 
 // src/cdp.ts
 var CreatorOrigin = "https://creator.xiaohongshu.com";
@@ -7798,9 +7905,15 @@ var Page = class _Page {
     if (result.exceptionDetails) throw Error(result.exceptionDetails.exception?.description ?? "\u9875\u9762\u64CD\u4F5C\u5931\u8D25");
     return result.result.value;
   }
+  /** 每一步自动操作前的检查点（小红书弹出验证时停下交给用户），返回停了多少毫秒；没设就是 0。不能在里面调 waitFor。 */
+  guard;
+  async checkpoint() {
+    return this.guard ? this.guard() : 0;
+  }
   async waitFor(fn, timeout, message = "\u7B49\u5F85\u9875\u9762\u8D85\u65F6\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5\u767B\u5F55\u6216\u9875\u9762\u72B6\u6001") {
-    const deadline = Date.now() + timeout;
+    let deadline = Date.now() + timeout;
     do {
+      deadline += await this.checkpoint();
       try {
         if (await this.evaluate(fn)) return;
       } catch (err) {
@@ -7879,7 +7992,14 @@ function validateBridge(value) {
 function connectBridge(value) {
   const bridge = validateBridge(value);
   let connected = true;
-  const request2 = async (body) => {
+  let queue = Promise.resolve();
+  const request2 = (body) => {
+    const run = queue.then(() => send(body));
+    queue = run.catch(() => {
+    });
+    return run;
+  };
+  const send = async (body) => {
     if (!connected) throw Error("\u7F51\u9875\u81EA\u52A8\u586B\u5199\u5DF2\u7ED3\u675F");
     const response = await fetch(bridge.endpoint, {
       method: "POST",
@@ -7914,6 +8034,12 @@ async function openBrowser(_profile, options) {
     },
     close: async () => {
       await bridge.request({ action: "close" });
+    },
+    busy: async (message, progress) => {
+      await bridge.request({ action: "busy", message: message.slice(0, 80), progress });
+    },
+    idle: async () => {
+      await bridge.request({ action: "busy", active: false });
     },
     disconnect() {
       bridge.disconnect();
@@ -7976,7 +8102,61 @@ ${attribution}`;
   const videoHash = hash.digest("hex");
   if (video.sha256 && video.sha256 !== videoHash) throw Error("\u6210\u7247\u5DF2\u53D8\u52A8\uFF0C\u8BF7\u5148\u5237\u65B0\u53D1\u5E03\u4FE1\u606F");
   const coverPath = pickCover(root, cover.images, landscape(video));
-  return { title, content, tags: normalizedTags, video: videoPath, videoHash, cover: coverPath };
+  const stat = import_node_fs3.default.statSync(videoPath);
+  return {
+    title,
+    content,
+    tags: normalizedTags,
+    video: videoPath,
+    videoHash,
+    cover: coverPath,
+    videoSize: stat.size,
+    videoModified: Math.floor(stat.mtimeMs),
+    videoDuration: mp4Duration(videoPath)
+  };
+}
+function mp4Duration(file) {
+  let fd;
+  try {
+    fd = import_node_fs3.default.openSync(file, "r");
+    const size = import_node_fs3.default.fstatSync(fd).size;
+    const read = (offset, length) => {
+      const buffer = Buffer.alloc(length);
+      return buffer.subarray(0, import_node_fs3.default.readSync(fd, buffer, 0, length, offset));
+    };
+    const boxes = function* (start, end) {
+      let offset = start;
+      while (offset + 8 <= end) {
+        const head = read(offset, 16);
+        if (head.length < 8) return;
+        let length = head.readUInt32BE(0), header = 8;
+        if (length === 1) {
+          if (head.length < 16) return;
+          length = Number(head.readBigUInt64BE(8));
+          header = 16;
+        } else if (length === 0) length = end - offset;
+        if (length < header) return;
+        yield { type: head.toString("latin1", 4, 8), start: offset + header, end: Math.min(offset + length, end) };
+        offset += length;
+      }
+    };
+    for (const top of boxes(0, size)) {
+      if (top.type !== "moov") continue;
+      for (const box of boxes(top.start, top.end)) {
+        if (box.type !== "mvhd") continue;
+        const body = read(box.start, 32);
+        const version = body[0];
+        const scale = version === 1 ? body.readUInt32BE(20) : body.readUInt32BE(12);
+        const duration = version === 1 ? Number(body.readBigUInt64BE(24)) : body.readUInt32BE(16);
+        return scale ? Math.round(duration * 1e3 / scale) : null;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== void 0) import_node_fs3.default.closeSync(fd);
+  }
 }
 function landscape(video) {
   const w = Number(video.width_px), h = Number(video.height_px);
@@ -8002,23 +8182,90 @@ function pickCover(root, images, wide) {
 
 // src/prepare.ts
 var import_node_fs4 = __toESM(require("node:fs"), 1);
-async function preparePage(page, draft, progress, options = {}) {
-  const timeout = options.timeout ?? 10 * 6e4;
-  progress(0.1, "\u8BF7\u5728\u6253\u5F00\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3\u5B8C\u6210\u767B\u5F55");
-  await page.waitFor(uploadInputPresent, Math.min(timeout, 18e4), "\u5C1A\u672A\u8FDB\u5165\u4E0A\u4F20\u9875\u9762\u3002\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u5B8C\u6210\u767B\u5F55\uFF0C\u518D\u70B9\u4E00\u6B21\u300C\u4E0A\u4F20\u5E76\u586B\u5199\u300D");
-  await page.click('.creator-tab, [role="tab"]', "\u4E0A\u4F20\u89C6\u9891");
-  if (!await resumeDraft(page, draft, progress, timeout)) {
-    progress(0.2, "\u6B63\u5728\u4E0A\u4F20\u89C6\u9891\uFF0C\u8BF7\u4FDD\u7559\u5C0F\u7EA2\u4E66\u7A97\u53E3");
-    await page.upload('input.upload-input, input[type="file"][accept*="video"]', draft.video);
+var AlreadyPublished = class extends Error {
+  constructor(note) {
+    const when = note.time ? ` ${note.time} ` : "";
+    super(`\u8FD9\u4E2A\u6210\u7247${when}\u5DF2\u7ECF\u53D1\u5230\u8FD9\u4E2A\u5C0F\u7EA2\u4E66\u8D26\u53F7\u4E86\uFF08\u300C${note.title}\u300D${note.reviewing ? "\uFF0C\u6B63\u5728\u5BA1\u6838" : ""}\uFF09\uFF0C\u8FD9\u6B21\u6CA1\u6709\u4E0A\u4F20\u3002\u786E\u5B9E\u8981\u518D\u53D1\u4E00\u6B21\uFF0C\u8BF7\u70B9\u300C\u4ECD\u7136\u4E0A\u4F20\u300D`);
+    this.note = note;
   }
-  await page.waitFor(videoUploaded, timeout, "\u89C6\u9891\u4E0A\u4F20\u6216\u5904\u7406\u8D85\u65F6\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
-  progress(0.55, "\u6B63\u5728\u586B\u5199\u6807\u9898\u3001\u6B63\u6587\u548C\u8BDD\u9898");
-  await page.fillTitle(draft.title);
-  await page.fillContent(draft.content);
+  note;
+};
+function findPublished(notes, draft) {
+  const same = (a, b) => a.replace(/\s+/g, "") === b.replace(/\s+/g, "");
+  return notes.find((note) => note.type === "video" && same(note.title, draft.title) && (draft.videoDuration == null || note.duration !== null && Math.abs(note.duration - draft.videoDuration) <= 1500));
+}
+function verificationGuard(page, progress, last, options) {
+  const open = async (navigating) => {
+    try {
+      return await page.evaluate(verificationOpen);
+    } catch (err) {
+      if (/context/i.test(String(err))) return navigating;
+      throw err;
+    }
+  };
+  return async () => {
+    if (!await open(false)) return 0;
+    const started = Date.now();
+    options.onPause?.();
+    progress(last(), "\u5C0F\u7EA2\u4E66\u8981\u6C42\u9A8C\u8BC1\uFF1A\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u5B8C\u6210\u9A8C\u8BC1\uFF0C\u5B8C\u6210\u540E\u81EA\u52A8\u7EE7\u7EED");
+    await page.raw("Page.bringToFront").catch(() => {
+    });
+    while (await open(true)) await delay(1e3);
+    await delay(1e3);
+    options.onResume?.();
+    return Date.now() - started;
+  };
+}
+async function preparePage(page, draft, report, options = {}) {
+  const timeout = options.timeout ?? 10 * 6e4;
+  let fraction = 0;
+  const progress = (value, message) => {
+    fraction = value;
+    report(value, message);
+  };
+  const guard = () => {
+    page.guard = verificationGuard(page, report, () => fraction, options);
+  };
+  try {
+    return await fillPage(page, draft, progress, options, timeout, guard);
+  } finally {
+    page.guard = void 0;
+  }
+}
+async function fillPage(page, draft, progress, options, timeout, guard) {
   const warnings = [];
+  if (options.resume) {
+    guard();
+    progress(0.2, "\u5C0F\u7EA2\u4E66\u7A97\u53E3\u91CC\u5DF2\u6709\u8FD9\u4E2A\u6210\u7247\uFF0C\u63A5\u7740\u4E0A\u6B21\u7684\u4E0A\u4F20\u7EE7\u7EED");
+  } else {
+    progress(0.1, "\u8BF7\u5728\u6253\u5F00\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3\u5B8C\u6210\u767B\u5F55");
+    await page.waitFor(uploadInputPresent, Math.min(timeout, 18e4), "\u5C1A\u672A\u8FDB\u5165\u4E0A\u4F20\u9875\u9762\u3002\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u5B8C\u6210\u767B\u5F55\uFF0C\u518D\u70B9\u4E00\u6B21\u300C\u4E0A\u4F20\u5E76\u586B\u5199\u300D");
+    await page.click('.creator-tab, [role="tab"]', "\u4E0A\u4F20\u89C6\u9891");
+    if (!await resumeDraft(page, draft, progress, timeout)) {
+      if (!options.again) {
+        progress(0.15, "\u6B63\u5728\u68C0\u67E5\u8FD9\u4E2A\u6210\u7247\u662F\u5426\u5DF2\u7ECF\u53D1\u8FC7");
+        const notes = await page.evaluate(recentNotes, 3).catch(() => null);
+        const published = notes && findPublished(notes, draft);
+        if (published) throw new AlreadyPublished(published);
+        if (!notes) warnings.push("\u6CA1\u80FD\u8BFB\u5230\u8FD9\u4E2A\u8D26\u53F7\u5DF2\u53D1\u5E03\u7684\u7B14\u8BB0\uFF0C\u6CA1\u6709\u68C0\u67E5\u8FD9\u4E2A\u6210\u7247\u662F\u5426\u53D1\u8FC7\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u7559\u610F\u3002");
+      }
+      progress(0.2, "\u6B63\u5728\u4E0A\u4F20\u89C6\u9891\uFF0C\u8BF7\u4FDD\u7559\u5C0F\u7EA2\u4E66\u7A97\u53E3");
+      await page.upload('input.upload-input, input[type="file"][accept*="video"]', draft.video);
+    }
+    options.onUpload?.();
+    guard();
+  }
+  await waitForVideo(page, progress);
+  progress(0.55, "\u6B63\u5728\u586B\u5199\u6807\u9898\u3001\u6B63\u6587\u548C\u8BDD\u9898");
+  await page.checkpoint();
+  await page.fillTitle(draft.title);
+  await page.checkpoint();
+  await page.fillContent(draft.content);
   if (draft.tags.length) {
+    await page.checkpoint();
     if (!await page.press("Enter")) await page.type(" ", 0);
     for (const tag of draft.tags) {
+      await page.checkpoint();
       const outcome = await insertTopic(page, tag, timeout);
       if (outcome === "picked") continue;
       if (outcome === "missing") warnings.push(`\u5C0F\u7EA2\u4E66\u6CA1\u6709\u627E\u5230\u8BDD\u9898\u300C${tag}\u300D\uFF0C\u5DF2\u586B\u4E3A\u6587\u5B57\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u786E\u8BA4\u3002`);
@@ -8029,6 +8276,7 @@ async function preparePage(page, draft, progress, options = {}) {
     warnings.push("\u53D1\u5E03\u4FE1\u606F\u91CC\u6CA1\u6709\u767B\u8BB0\u5C01\u9762\uFF0C\u5C0F\u7EA2\u4E66\u4F1A\u7528\u89C6\u9891\u9996\u5E27\uFF1B\u9700\u8981\u7684\u8BDD\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762\u3002");
   } else {
     progress(0.75, "\u6B63\u5728\u8BBE\u7F6E\u5C01\u9762");
+    await page.checkpoint();
     await setCover(page, draft.cover, timeout);
   }
   warnings.push(...await removeExtraTopics(page, draft.tags));
@@ -8036,26 +8284,71 @@ async function preparePage(page, draft, progress, options = {}) {
   progress(1, "\u5185\u5BB9\u5DF2\u586B\u597D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5\u5E76\u624B\u52A8\u53D1\u5E03");
   return warnings;
 }
+async function waitForVideo(page, progress) {
+  let reported;
+  for (; ; ) {
+    await page.checkpoint();
+    let status;
+    try {
+      status = await page.evaluate(videoStatus);
+    } catch (err) {
+      if (!/context/i.test(String(err))) throw err;
+    }
+    if (status?.state === "ready") return;
+    if (status?.state === "failed") throw Error("\u5C0F\u7EA2\u4E66\u663E\u793A\u89C6\u9891\u4E0A\u4F20\u6216\u5904\u7406\u5931\u8D25\uFF0C\u8BF7\u5728\u7A97\u53E3\u68C0\u67E5");
+    const percent = status?.percent == null ? null : Math.floor(status.percent);
+    if (status && percent !== reported) {
+      reported = percent;
+      progress(0.2 + 0.35 * (percent ?? 0) / 100, percent === null ? "\u6B63\u5728\u4E0A\u4F20\u89C6\u9891\uFF0C\u8BF7\u4FDD\u7559\u5C0F\u7EA2\u4E66\u7A97\u53E3" : `\u6B63\u5728\u4E0A\u4F20\u89C6\u9891 ${percent}%\uFF0C\u8BF7\u4FDD\u7559\u5C0F\u7EA2\u4E66\u7A97\u53E3`);
+    }
+    await delay(1e3);
+  }
+}
+async function editorHoldsFilm(page, draft) {
+  if (draft.videoDuration == null) return false;
+  try {
+    const seconds = await page.evaluate(editorVideoDuration);
+    return seconds !== null && Math.abs(seconds * 1e3 - draft.videoDuration) <= 50;
+  } catch {
+    return false;
+  }
+}
+async function canResume(page) {
+  try {
+    if (!await page.evaluate(editorOpen)) return false;
+    const status = await page.evaluate(videoStatus);
+    return status?.state === "uploading" || status?.state === "ready";
+  } catch {
+    return false;
+  }
+}
 async function setCover(page, cover, timeout) {
   const step = Math.min(timeout, 15e3);
   await page.waitFor(coverEntryPresent, step, "\u627E\u4E0D\u5230\u8BBE\u7F6E\u5C01\u9762\u7684\u5165\u53E3\uFF08\u300C\u7F16\u8F91\u5C01\u9762\u300D\uFF09\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  await page.checkpoint();
   if (!await page.click(".cover-edit-entry")) return legacyCover(page, cover, timeout);
   await page.waitFor(coverEditorOpen, step, "\u5C01\u9762\u7F16\u8F91\u5668\u6CA1\u6709\u6253\u5F00\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  await page.checkpoint();
   if (await page.evaluate(clearUploadedCover)) await page.waitFor(coverInputReady, step, "\u6E05\u4E0D\u6389\u7F16\u8F91\u5668\u91CC\u539F\u6765\u90A3\u5F20\u5C01\u9762\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
   await page.waitFor(coverInputReady, step, "\u5C01\u9762\u7F16\u8F91\u5668\u91CC\u627E\u4E0D\u5230\u300C\u4E0A\u4F20\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
+  await page.checkpoint();
   await page.upload('.main-cover-editor-modal input[type="file"][accept*="image"]', cover);
   await page.waitFor(coverUploaded, step, "\u5C01\u9762\u56FE\u7247\u6CA1\u6709\u4F20\u4E0A\u53BB\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5");
+  await page.checkpoint();
   if (!await page.evaluate(clickCoverDone)) throw Error("\u5C01\u9762\u7F16\u8F91\u5668\u91CC\u627E\u4E0D\u5230\u300C\u5B8C\u6210\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u68C0\u67E5\u5C01\u9762");
   await page.waitFor(() => !document.querySelector(".main-cover-editor-modal")?.getClientRects().length, step, "\u5C01\u9762\u8FD8\u6CA1\u4FDD\u5B58\uFF08\u7F16\u8F91\u5668\u6CA1\u6709\u5173\u4E0A\uFF09\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
 }
 async function legacyCover(page, cover, timeout) {
   const step = Math.min(timeout, 15e3);
+  await page.checkpoint();
   if (!await page.click("div.upload-cover, button.upload-cover") && !await page.click("button", "\u8BBE\u7F6E\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u8BBE\u7F6E\u5C01\u9762\u7684\u5165\u53E3\uFF08\u300C\u7F16\u8F91\u5C01\u9762\u300D\uFF09\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
   await page.waitFor(coverDialogOpen, step, "\u5C01\u9762\u7A97\u53E3\u6CA1\u6709\u6253\u5F00");
+  await page.checkpoint();
   if (!await page.click('.d-modal *, [role="dialog"] *', "\u4E0A\u4F20\u5C01\u9762")) throw Error("\u627E\u4E0D\u5230\u300C\u4E0A\u4F20\u5C01\u9762\u300D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u624B\u52A8\u8BBE\u7F6E\u5C01\u9762");
   await page.upload('.d-modal input[type="file"][accept*="image"], [role="dialog"] input[type="file"][accept*="image"]', cover);
   await delay(Math.min(timeout, 1e3));
   await page.waitFor(coverConfirmReady, step, "\u5C01\u9762\u5C1A\u672A\u5904\u7406\u5B8C\u6210");
+  await page.checkpoint();
   if (!await page.click('.d-modal:has(input[accept*="image"]) .d-modal-footer button, [role="dialog"]:has(input[accept*="image"]) button', "\u786E\u5B9A")) throw Error("\u5C01\u9762\u6CA1\u6709\u786E\u8BA4\u6210\u529F");
   await page.waitFor(coverDialogClosed, step, "\u5C01\u9762\u5C1A\u672A\u4FDD\u5B58\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u7A97\u53E3\u68C0\u67E5");
 }
@@ -8065,10 +8358,10 @@ async function insertTopic(page, tag, timeout) {
   await page.type("#");
   await delay(Math.min(timeout, 200));
   await page.type(tag);
-  const deadline = Date.now() + Math.min(timeout, 5e3);
+  let deadline = Date.now() + Math.min(timeout, 5e3);
   let wrong = "";
   let last = null;
-  for (let attempts = 0; attempts < 3 && Date.now() < deadline; ) {
+  for (let attempts = 0; attempts < 3 && (deadline += await page.checkpoint(), Date.now() < deadline); ) {
     const at = await page.evaluate(topicTarget, tag);
     const settled = at && last && Math.abs(at.x - last.x) < 1 && Math.abs(at.y - last.y) < 1;
     last = at;
@@ -8076,11 +8369,17 @@ async function insertTopic(page, tag, timeout) {
       await delay(Math.min(timeout, 150));
       continue;
     }
+    const paused = await page.checkpoint();
+    if (paused) {
+      deadline += paused;
+      last = null;
+      continue;
+    }
     attempts++;
     await page.clickAt(at.x, at.y);
-    const settle = Date.now() + Math.min(timeout, 1e3);
+    let settle = Date.now() + Math.min(timeout, 1e3);
     let now = await page.evaluate(insertedTopics);
-    while (now.count === start.count && Date.now() < settle) {
+    while (now.count === start.count && (settle += await page.checkpoint(), Date.now() < settle)) {
       await delay(50);
       now = await page.evaluate(insertedTopics);
     }
@@ -8091,6 +8390,7 @@ async function insertTopic(page, tag, timeout) {
     await delay(100);
     if ((await page.evaluate(insertedTopics)).count >= now.count) return { other: wrong };
     start = await page.evaluate(insertedTopics);
+    deadline += await page.checkpoint();
     await page.type("#" + tag);
     last = null;
   }
@@ -8099,7 +8399,8 @@ async function insertTopic(page, tag, timeout) {
   return wrong ? { other: wrong } : "missing";
 }
 async function resumeDraft(page, draft, progress, timeout) {
-  const found = await page.evaluate(findVideoDraft, import_node_fs4.default.statSync(draft.video).size);
+  const film = { size: draft.videoSize ?? import_node_fs4.default.statSync(draft.video).size, duration: draft.videoDuration ?? null };
+  const found = await page.evaluate(findVideoDraft, film);
   if (!found) return false;
   progress(0.2, "\u627E\u5230\u8FD9\u4E2A\u6210\u7247\u4E0A\u6B21\u7559\u4E0B\u7684\u8349\u7A3F\uFF0C\u6B63\u5728\u6253\u5F00");
   if (!await page.click(".draft-title, .draft-title-box")) return false;
@@ -8115,6 +8416,7 @@ async function resumeDraft(page, draft, progress, timeout) {
 async function removeExtraTopics(page, tags) {
   const removed = [];
   for (let round = 0; round < 20; round++) {
+    await page.checkpoint();
     const name = await page.evaluate(selectExtraTopic, tags);
     if (!name) break;
     const before = (await page.evaluate(insertedTopics)).count;
@@ -8152,7 +8454,7 @@ function validateRequest(raw) {
   if (typeof r.data_dir !== "string" || !import_node_path4.default.isAbsolute(r.data_dir)) throw Error("data_dir \u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84");
   if (typeof r.project_root !== "string" || r.project_root !== "" && !import_node_path4.default.isAbsolute(r.project_root)) throw Error("project_root \u9700\u8981\u7EDD\u5BF9\u8DEF\u5F84");
   const params = object(r.params ?? {}), settings = object(r.settings ?? {});
-  for (const key of Object.keys(params)) if (!["account"].includes(key)) throw Error(`\u4E0D\u652F\u6301\u53C2\u6570 ${key}\uFF1B\u63D2\u4EF6\u4E0D\u4F1A\u81EA\u52A8\u53D1\u5E03`);
+  for (const key of Object.keys(params)) if (!["account", "again"].includes(key)) throw Error(`\u4E0D\u652F\u6301\u53C2\u6570 ${key}\uFF1B\u63D2\u4EF6\u4E0D\u4F1A\u81EA\u52A8\u53D1\u5E03`);
   for (const value of Object.values(params)) if (typeof value !== "string" || value.length > 500) throw Error("\u53C2\u6570\u9700\u8981\u5B57\u7B26\u4E32");
   const browser = r.browser === void 0 ? void 0 : validateBridge(r.browser);
   return { project_root: r.project_root, data_dir: r.data_dir, params, settings, browser };
@@ -8216,12 +8518,48 @@ async function runOperation(operation, raw, progress = () => {
       const browser = await deps.open(store.profile(account.id), { bridge: request2.browser, account: account.id, label: account.name, hint: draft ? "\u8BF7\u68C0\u67E5\u8D26\u53F7\u4E0E\u5185\u5BB9\uFF0C\u53D1\u5E03\u7531\u4F60\u786E\u8BA4" : "\u8FD9\u662F\u8FD9\u4E2A\u8D26\u53F7\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3" });
       try {
         const page = await deps.page(browser);
-        if (draft || !browser.reused) await page.navigate(page.origin + (draft ? "/publish/publish?from=menu&target=video" : "/"));
+        const resume = !!draft && browser.reused === true && await canResume(page) && (store.lastUpload(account.id) === draft.videoHash || await editorHoldsFilm(page, draft));
+        if (!resume && (draft || !browser.reused)) await page.navigate(page.origin + (draft ? "/publish/publish?from=menu&target=video" : "/"));
         if (!draft) return { status: "browser_opened", message: `\u5DF2\u6253\u5F00\u300C${account.name}\u300D\u7684\u5C0F\u7EA2\u4E66\u7A97\u53E3`, account };
-        const warnings = await deps.prepare(page, draft, (fraction, message) => {
-          progress(fraction, message);
-          update({ status: "running", message, account });
-        });
+        let masked = false, paused = false, lastMessage = "", lastFraction = 0;
+        const mask = (message, fraction) => {
+          masked = true;
+          lastMessage = message;
+          lastFraction = Math.max(0, Math.min(1, fraction));
+          if (!paused) void browser.busy?.(lastMessage, lastFraction).catch(() => {
+          });
+        };
+        if (resume) mask("\u63A5\u7740\u4E0A\u6B21\u7684\u4E0A\u4F20", 0.2);
+        let warnings;
+        try {
+          warnings = await deps.prepare(page, draft, (fraction, message) => {
+            progress(fraction, message);
+            update({ status: "running", message, account });
+            if (masked && !paused) mask(message, fraction);
+          }, {
+            resume,
+            again: params.again === "1",
+            onUpload: () => {
+              store.recordUpload(account.id, draft.videoHash);
+              mask("\u6B63\u5728\u4E0A\u4F20\u89C6\u9891", 0.2);
+            },
+            onPause: () => {
+              paused = true;
+              if (masked) void browser.idle?.().catch(() => {
+              });
+            },
+            onResume: () => {
+              paused = false;
+              if (masked) mask(lastMessage, lastFraction);
+            }
+          });
+        } catch (err) {
+          if (err instanceof AlreadyPublished) return { status: "already_published", message: err.message, account };
+          throw err;
+        } finally {
+          if (masked) await browser.idle?.().catch(() => {
+          });
+        }
         await page.raw("Page.bringToFront");
         return { status: "ready_to_publish", message: "\u5185\u5BB9\u5DF2\u586B\u597D\uFF0C\u8BF7\u5728\u5C0F\u7EA2\u4E66\u9875\u9762\u6838\u5BF9\u8D26\u53F7\u3001\u5C01\u9762\u548C\u6587\u6848\uFF0C\u518D\u624B\u52A8\u53D1\u5E03", account, warnings, video_sha256: draft.videoHash };
       } finally {

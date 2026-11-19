@@ -7,6 +7,9 @@ export interface BrowserConnection {
   state?(): Promise<{ open: boolean; visible: boolean }>;
   /** 关掉片场里的这个页面（登录完自动回到片场）。 */
   close?(): Promise<void>;
+  /** 自动操作期间在页面上盖遮罩显示进度（用户点不到页面）；idle 揭开。操作结束时片场也会自动揭开。 */
+  busy?(message: string, progress: number | null): Promise<void>;
+  idle?(): Promise<void>;
   disconnect(): void;
 }
 
@@ -82,9 +85,14 @@ export class Page {
     if (result.exceptionDetails) throw Error(result.exceptionDetails.exception?.description ?? '页面操作失败');
     return result.result.value as T;
   }
+  /** 每一步自动操作前的检查点（小红书弹出验证时停下交给用户），返回停了多少毫秒；没设就是 0。不能在里面调 waitFor。 */
+  guard?: () => Promise<number>;
+  async checkpoint(): Promise<number> { return this.guard ? this.guard() : 0; }
   async waitFor(fn: () => boolean, timeout: number, message = '等待页面超时，请在小红书窗口检查登录或页面状态'): Promise<void> {
-    const deadline = Date.now() + timeout;
+    let deadline = Date.now() + timeout;
     do {
+      // 停下等用户验证的时间不算进这一步的时限。
+      deadline += await this.checkpoint();
       try { if (await this.evaluate(fn)) return; }
       catch (err) { if (!/context|页面已离开/i.test(String(err))) throw err; }
       await delay(Math.min(250, timeout));

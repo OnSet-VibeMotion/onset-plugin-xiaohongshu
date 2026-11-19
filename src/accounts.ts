@@ -71,6 +71,21 @@ export class AccountStore {
     fs.rmSync(path.join(this.root, id), { recursive: true, force: true });
     fs.rmSync(path.join(fs.realpathSync(this.dataDir), 'web-sessions', id), { recursive: true, force: true });
   }
+  /**
+   * 这个账号的小红书窗口里最近一次由插件放进去的成片（sha256）。窗口还停在它的编辑页时，再点「上传并填写」接着这次的上传，
+   * 不重传。只记成片的摘要，不记项目路径与文案。
+   */
+  lastUpload(id: string): string | undefined {
+    if (!accountID.test(id)) return undefined;
+    try {
+      const value = readSmallJSON(path.join(this.root, id, 'upload.json')) as { video_sha256?: unknown } | null;
+      return typeof value?.video_sha256 === 'string' ? value.video_sha256 : undefined;
+    } catch { return undefined; }
+  }
+  recordUpload(id: string, videoHash: string): void {
+    this.get(id);
+    atomicJSON(path.join(childDirectory(this.root, id), 'upload.json'), { video_sha256: videoHash, uploaded_at: new Date().toISOString() });
+  }
   profile(id: string): string {
     this.get(id);
     return childDirectory(this.root, `${id}/browser`);

@@ -4,7 +4,7 @@
     "onset": "0.1.0"
   },
   "id": "xiaohongshu-upload",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "name": "小红书上传助手",
   "description": "选择小红书账号，在片场客户端内自动上传成片、封面并填入文案，最后由你检查并发布。",
   "after": "publish",
@@ -27,6 +27,11 @@
             "is": "ready_to_publish",
             "status": "done",
             "detail": "已填写，请在小红书页面手动发布"
+          },
+          {
+            "is": "already_published",
+            "status": "done",
+            "detail": "这个成片已经发到小红书了"
           },
           {
             "is": "running",
@@ -135,6 +140,10 @@
           "type": "string",
           "description": "账号编号",
           "required": true
+        },
+        "again": {
+          "type": "string",
+          "description": "这个成片已经发过也照样上传（填 1）"
         }
       }
     }

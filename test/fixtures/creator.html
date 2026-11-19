@@ -3,15 +3,18 @@
 <div class="header-draft"><div class="draft-title-box"><span class="draft-title">草稿箱</span></div></div>
 <div class="d-drawer d-drawer-right draft-drawer" hidden><div class="d-drawer-content"><div class="draft-list"></div></div></div>
 <input type="file" class="upload-input" accept="video/*">
-<p id="progress">请上传视频</p>
+<p id="progress" class="upload-stage">请上传视频</p>
+<!-- 编辑页：选好视频（或从草稿箱打开草稿）后才出来。 -->
+<div id="editor" hidden>
 <input placeholder="填写标题"><div contenteditable="true" class="tiptap ProseMirror" style="min-height:60px"></div>
 <!-- 新版封面（照 2026-11-18 的真实页面）：「编辑封面」打开 .main-cover-editor-modal，上传框传完图就换成缩略图（带「清除已上传封面」），「完成」关上。 -->
 <div class="cover-plugin-preview"><div class="cover-plugin-title"><span>设置封面</span></div><div class="cover"><div class="default row"><div class="operator"><div class="cover-edit-stack"><div class="cover-edit-entry"><span class="cover-edit-entry-text">编辑封面</span><span class="cover-edit-help"><svg width="12" height="12"></svg></span></div></div></div></div></div></div>
+</div>
 <div class="d-modal-mask" style="position:fixed;inset:0" hidden><div class="d-modal d-modal-no-footer cover-modal main-cover-editor-modal"><div class="d-modal-header"><h6>设置封面</h6></div><div class="d-modal-content"><div class="editor-panel"><div class="cover-choose-container"><ul id="images-ul"><li class="item">帧</li></ul><div class="upload-slot"></div></div><div class="bottom"><button class="d-button custom-button bg-red mojito-button"><span>完成</span></button></div></div></div></div><img class="close-icon" alt=""></div>
 <div class="publish-page-publish-btn"><button id="publish">发布</button></div>
 <script>
 window.submits=0; window.uploads=[];
-document.querySelector('.upload-input').onchange=e=>{uploads.push(e.target.files[0].name);document.querySelector('#progress').textContent='上传成功，重新上传';};
+document.querySelector('.upload-input').onchange=e=>{uploads.push(e.target.files[0].name);document.querySelector('#editor').hidden=false;document.querySelector('#progress').textContent='上传成功，重新上传';};
 // window.existingCover：编辑器里已经有一张传上去的封面（接着草稿做时那样）。
 const mask=document.querySelector('.d-modal-mask'), slot=mask.querySelector('.upload-slot');
 function emptySlot(){slot.innerHTML='<label class="upload-btn"><input class="upload-input" accept="image/png, image/jpeg, image/*" type="file" aria-label="上传封面图片"><span class="upload-label">上传</span></label>';
@@ -77,7 +80,7 @@ document.querySelector('.draft-title').onclick=async()=>{
   list.innerHTML=recs.map(r=>'<div class="draft-item"><div class="draft-info"><div class="draft-info-desc"><div class="draft-title-text has-title">'+r.content.draftStore.title+'</div><div class="draft-time">保存于'+fmt(r.timeStamp)+'</div></div><div class="draft-actions"><div class="btn"><span>编辑</span></div><div class="btn"><span>删除</span></div></div></div></div>').join('');
   drawer.hidden=false;
   list.querySelectorAll('.draft-item').forEach((it,i)=>{const [edit,del]=it.querySelectorAll('.btn');
-    edit.onclick=()=>{window.resumed=recs[i].draftId;drawer.hidden=true;document.querySelector('#progress').textContent='上传成功，重新上传';};
+    edit.onclick=()=>{window.resumed=recs[i].draftId;drawer.hidden=true;document.querySelector('#editor').hidden=false;document.querySelector('#progress').textContent='上传成功，重新上传';};
     del.onclick=()=>{window.deleted=true;};});
 };
 </script></body></html>

@@ -5,7 +5,14 @@ import { parseDocument } from 'yaml';
 import { projectFile } from './files';
 
 /** cover 为空表示 publish.md 里没有登记封面：不设置，小红书用视频首帧。 */
-export interface Draft { title: string; content: string; tags: string[]; video: string; videoHash: string; cover: string }
+export interface Draft {
+  title: string; content: string; tags: string[]; video: string; videoHash: string; cover: string;
+  /** 文件大小（字节）与修改时间（毫秒）：认出小红书本机草稿里是不是这个成片。 */
+  videoSize?: number;
+  videoModified?: number;
+  /** 成片时长（毫秒），读不出来为 null：和已发布笔记、草稿、编辑页里的视频时长比对。 */
+  videoDuration?: number | null;
+}
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('发布信息格式不正确');
   return value as Record<string, unknown>;
@@ -57,7 +64,52 @@ export async function readDraft(root: string): Promise<Draft> {
   const videoHash = hash.digest('hex');
   if (video.sha256 && video.sha256 !== videoHash) throw Error('成片已变动，请先刷新发布信息');
   const coverPath = pickCover(root, cover.images, landscape(video));
-  return { title, content, tags: normalizedTags, video: videoPath, videoHash, cover: coverPath };
+  const stat = fs.statSync(videoPath);
+  return {
+    title, content, tags: normalizedTags, video: videoPath, videoHash, cover: coverPath,
+    videoSize: stat.size, videoModified: Math.floor(stat.mtimeMs), videoDuration: mp4Duration(videoPath),
+  };
+}
+
+/**
+ * 读 MP4 / MOV 的时长（moov/mvhd，毫秒）。只按盒子头跳着读，不读整个文件；读不出来返回 null。
+ */
+export function mp4Duration(file: string): number | null {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const size = fs.fstatSync(fd).size;
+    const read = (offset: number, length: number) => {
+      const buffer = Buffer.alloc(length);
+      return buffer.subarray(0, fs.readSync(fd!, buffer, 0, length, offset));
+    };
+    const boxes = function* (start: number, end: number) {
+      let offset = start;
+      while (offset + 8 <= end) {
+        const head = read(offset, 16);
+        if (head.length < 8) return;
+        let length = head.readUInt32BE(0), header = 8;
+        if (length === 1) { if (head.length < 16) return; length = Number(head.readBigUInt64BE(8)); header = 16; }
+        else if (length === 0) length = end - offset;
+        if (length < header) return;
+        yield { type: head.toString('latin1', 4, 8), start: offset + header, end: Math.min(offset + length, end) };
+        offset += length;
+      }
+    };
+    for (const top of boxes(0, size)) {
+      if (top.type !== 'moov') continue;
+      for (const box of boxes(top.start, top.end)) {
+        if (box.type !== 'mvhd') continue;
+        const body = read(box.start, 32);
+        const version = body[0];
+        const scale = version === 1 ? body.readUInt32BE(20) : body.readUInt32BE(12);
+        const duration = version === 1 ? Number(body.readBigUInt64BE(24)) : body.readUInt32BE(16);
+        return scale ? Math.round(duration * 1000 / scale) : null;
+      }
+    }
+    return null;
+  } catch { return null; }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 
 /** 成片是横屏吗：看 publish.md 的 video.width_px / height_px，没写就当竖屏（小红书原来的做法）。 */

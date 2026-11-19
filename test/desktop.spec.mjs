@@ -20,7 +20,10 @@ test('真实插件在片场内上传填写，返回项目后再打开仍保留�
   fs.writeFileSync(path.join(project.path, 'cover.png'), 'fixture-cover');
   fs.writeFileSync(path.join(project.path, 'publish.md'), `---\n${stringify({ platform: 'xiaohongshu', publish_status: 'ready', video: { path: 'final.mp4' }, copy: { primary_title: '片场内自动填写', introduction: '在客户端里检查并发布', hashtags: [] }, cover: { images: [{ platform: 'xiaohongshu', ratio: '3:4', path: 'cover.png' }] } })}---\n`);
   await electronApp.evaluate(({ session }, { dir, html }) => {
-    session.fromPath(dir).protocol.handle('https', () => new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }));
+    // 已发布笔记接口回一条也没有，其余地址都给模拟页面。
+    session.fromPath(dir).protocol.handle('https', request => new URL(request.url).pathname === '/api/galaxy/v2/creator/note/user/posted'
+      ? Response.json({ code: 0, success: true, data: { notes: [], page: -1 } })
+      : new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }));
   }, { dir: path.join(sandbox.userData, 'station-sessions', manifest.id, account), html: fixture });
   await openProject(page, project);
   const run = async op => {
@@ -40,8 +43,10 @@ test('真实插件在片场内上传填写，返回项目后再打开仍保留�
     const wc = webContents.getAllWebContents().find(w => w.getURL().startsWith('https://creator.xiaohongshu.com/'));
     const result = await wc.executeJavaScript(`({ title: document.querySelector('input[placeholder]').value, body: document.querySelector('[contenteditable]').innerText, video: document.querySelector('input[accept="video/*"]').files[0].name, cover: window.coverSaved, submits: window.submits })`);
     await wc.executeJavaScript(`document.querySelector('input[placeholder]').value='用户改过的标题'`);
-    const bar = webContents.getAllWebContents().find(w => w.getURL().startsWith('data:text/html'));
-    await bar.executeJavaScript(`document.querySelector('a').click()`);
+    // 工具栏与遮罩都是片场写的 data: 页面：点工具栏上的「返回片场」。
+    for (const bar of webContents.getAllWebContents().filter(w => w.getURL().startsWith('data:text/html'))) {
+      if (await bar.executeJavaScript(`(() => { const a = document.querySelector('a[href="https://onset.invalid/return"]'); a?.click(); return !!a; })()`)) break;
+    }
     return result;
   });
   expect(content).toEqual({ title: '片场内自动填写', body: '在客户端里检查并发布', video: 'final.mp4', cover: 'cover.png', submits: 0 });
